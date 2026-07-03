@@ -1,7 +1,9 @@
 import nodemailer from "nodemailer";
 
-function storeUrl(appid) {
-  return `https://store.steampowered.com/app/${appid}`;
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch])
+  );
 }
 
 function steamClientUrl(appid) {
@@ -22,14 +24,14 @@ function gameCardHtml(game) {
           <td width="184" valign="top">
             ${
               game.headerImage
-                ? `<img src="${game.headerImage}" width="184" style="border-radius:6px;display:block;" />`
+                ? `<img src="${escapeHtml(game.headerImage)}" width="184" style="border-radius:6px;display:block;" />`
                 : ""
             }
           </td>
           <td style="padding-left:16px;" valign="top">
-            <h3 style="margin:0 0 6px 0;font-size:17px;">${game.name}</h3>
+            <h3 style="margin:0 0 6px 0;font-size:17px;">${escapeHtml(game.name)}</h3>
             <p style="margin:0 0 4px 0;font-size:13px;color:#ccc;">
-              ${game.reviewScoreDesc ?? "Sin valoración"} · ${game.positivePercent}% positivas
+              ${escapeHtml(game.reviewScoreDesc ?? "Sin valoración")} · ${game.positivePercent}% positivas
               · ${game.totalReviews.toLocaleString("es-ES")} reseñas
             </p>
             <p style="margin:0 0 4px 0;font-size:13px;color:#ccc;">${hours}</p>
@@ -39,14 +41,18 @@ function gameCardHtml(game) {
                 : ""
             }
             <p style="margin:8px 0 0 0;">
-              <a href="${storeUrl(game.appid)}"
+              <a href="${escapeHtml(game.claimUrl)}"
                  style="background:#1a9fff;color:#fff;text-decoration:none;padding:8px 14px;border-radius:4px;font-size:13px;display:inline-block;">
-                 Reclamar en Steam
+                 Reclamar
               </a>
-              <a href="${steamClientUrl(game.appid)}"
-                 style="margin-left:8px;color:#1a9fff;text-decoration:none;font-size:13px;">
-                 Abrir en app de Steam
-              </a>
+              ${
+                game.appid
+                  ? `<a href="${escapeHtml(steamClientUrl(game.appid))}"
+                       style="margin-left:8px;color:#1a9fff;text-decoration:none;font-size:13px;">
+                       Abrir en app de Steam
+                     </a>`
+                  : ""
+              }
             </p>
           </td>
         </tr>
@@ -59,14 +65,27 @@ function rejectedRowHtml(game) {
   return `
   <tr>
     <td style="padding:6px 0;font-size:13px;color:#999;border-bottom:1px solid #222;">
-      <strong style="color:#ccc;">${game.name}</strong> —
-      <a href="${storeUrl(game.appid)}" style="color:#1a9fff;">ver en Steam</a>
-      · ${game.reasons.join(", ")}
+      <strong style="color:#ccc;">${escapeHtml(game.name)}</strong> —
+      <a href="${escapeHtml(game.claimUrl)}" style="color:#1a9fff;">ver</a>
+      · ${escapeHtml(game.reasons.join(", "))}
     </td>
   </tr>`;
 }
 
-export function buildEmailHtml({ qualifying, rejected, dateLabel }) {
+function unverifiedRowHtml(game) {
+  const worth = game.worth && game.worth !== "N/A" ? ` · valorado en ${escapeHtml(game.worth)}` : "";
+  const end = game.endDate && game.endDate !== "N/A" ? ` · hasta ${escapeHtml(game.endDate)}` : "";
+  return `
+  <tr>
+    <td style="padding:6px 0;font-size:13px;color:#999;border-bottom:1px solid #222;">
+      <strong style="color:#ccc;">${escapeHtml(game.name)}</strong> —
+      <a href="${escapeHtml(game.claimUrl)}" style="color:#1a9fff;">reclamar</a>
+      ${worth}${end}
+    </td>
+  </tr>`;
+}
+
+export function buildEmailHtml({ qualifying, rejected, unverified, dateLabel }) {
   const qualifyingHtml =
     qualifying.length > 0
       ? qualifying.map(gameCardHtml).join("")
@@ -83,15 +102,30 @@ export function buildEmailHtml({ qualifying, rejected, dateLabel }) {
         .join("")}</table>`
       : "";
 
+  const unverifiedHtml =
+    unverified && unverified.length > 0
+      ? `
+      <h4 style="margin:24px 0 8px 0;font-size:14px;color:#999;">
+        Giveaways de Steam sin datos de reseñas para verificar calidad
+      </h4>
+      <table cellpadding="0" cellspacing="0" width="100%">${unverified
+        .map(unverifiedRowHtml)
+        .join("")}</table>`
+      : "";
+
   return `
   <div style="font-family:Arial,Helvetica,sans-serif;background:#1b2838;color:#fff;padding:24px;max-width:640px;margin:0 auto;">
-    <h2 style="margin:0 0 4px 0;">Juegos gratis en Steam — ${dateLabel}</h2>
+    <h2 style="margin:0 0 4px 0;">Juegos gratis en Steam — ${escapeHtml(dateLabel)}</h2>
     <p style="margin:0 0 16px 0;color:#999;font-size:13px;">
       Resumen diario automático. Solo se destacan los que cumplen el filtro de calidad
       (reseñas, % positivas, horas medias jugadas).
     </p>
     <table cellpadding="0" cellspacing="0" width="100%">${qualifyingHtml}</table>
     ${rejectedHtml}
+    ${unverifiedHtml}
+    <p style="margin:24px 0 0 0;color:#666;font-size:11px;">
+      Datos de giveaways cortesía de <a href="https://www.gamerpower.com" style="color:#666;">GamerPower.com</a>.
+    </p>
   </div>`;
 }
 

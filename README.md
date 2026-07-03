@@ -24,33 +24,49 @@ Solo se evalúan apps de tipo `game` (se excluyen DLC, bandas sonoras, software)
 
 ## Cómo detecta que un juego "pasa a ser gratis"
 
-Se combinan dos fuentes públicas de Steam (sin necesidad de API key ni login):
+Se combinan dos fuentes públicas, ninguna requiere API key ni login:
 
-1. `store.steampowered.com/api/featuredcategories` — ofertas destacadas en portada.
-2. Búsqueda de la tienda filtrando por `specials=1&maxprice=free` — más exhaustiva.
+1. **[GamerPower](https://www.gamerpower.com/api/giveaways?platform=steam&type=game)**
+   — agregador dedicado a giveaways, filtrado a juegos completos en Steam.
+   Cubre tanto ofertas 100% en la tienda de Steam como keys repartidas a
+   través de partners. Fuente principal por ser la más exhaustiva y estable
+   (JSON diseñado para esto, no scraping).
+2. `store.steampowered.com/api/featuredcategories` — ofertas destacadas en
+   portada de Steam, como red de seguridad por si algo no apareciera aún
+   en GamerPower.
 
-Se filtran los resultados con descuento del 100% (es decir, que **antes**
-tenían precio y ahora cuestan 0), para no mezclar con juegos free-to-play
-de toda la vida.
+Cuando el giveaway de GamerPower no enlaza directamente a la ficha de Steam
+(p. ej. una key repartida por un partner), se intenta resolver el `appid`
+buscando el título en `store.steampowered.com/api/storesearch`, para poder
+consultar sus reseñas y aplicar el filtro de calidad. Si aun así no se
+encuentra, el juego se incluye en el correo en una sección aparte
+("sin datos de reseñas para verificar calidad") en vez de descartarlo o
+colarlo silenciosamente como si hubiera pasado el filtro.
 
-> Limitación conocida: esto cubre "ofertas temporales al 100%" y grandes
-> promociones destacadas. No detecta el caso raro de un juego que cambia
-> permanentemente su modelo a Free-to-Play sin pasar por una oferta.
+Como verificación cruzada, cualquier candidato con `appid` resuelto se
+contrasta contra la API oficial `appdetails` de Steam: si su precio actual
+no es 0, se descarta como falso positivo.
 
-El estado de qué `appid` ya se ha notificado se guarda en `data/seen.json`
-y se commitea automáticamente tras cada ejecución, para no repetir avisos
-del mismo juego mientras la oferta siga activa.
+> Limitación conocida: no detecta el caso raro de un juego que cambia
+> permanentemente su modelo a Free-to-Play sin pasar por ningún giveaway
+> ni oferta (ninguna de las dos fuentes lo reportaría).
+
+El estado de qué juegos ya se han notificado se guarda en `data/seen.json`
+(por `appid` de Steam, o por id de GamerPower si no se pudo resolver uno)
+y se commitea automáticamente tras cada ejecución, para no repetir avisos.
+
+Los datos de giveaways se muestran cortesía de GamerPower.com, con
+atribución en el propio correo (requisito de su API gratuita).
 
 ## Añadir el juego a tu librería
 
 No se hace de forma automática (para no tener que guardar tus credenciales
-de Steam como secreto). Cada juego del correo incluye dos enlaces:
-
-- **Reclamar en Steam**: abre la ficha de la tienda en el navegador. Con
-  sesión iniciada, solo tienes que pulsar "Instalar"/completar el carrito
-  gratuito.
-- **Abrir en app de Steam**: enlace `steam://` que abre directamente el
-  cliente de escritorio si lo tienes instalado.
+de Steam como secreto). Cada juego del correo incluye un botón **"Reclamar"** con el enlace de canje
+correcto según el origen: la ficha de Steam (checkout gratuito) para ofertas
+detectadas directamente en la tienda, o la página de GamerPower/partner
+cuando el giveaway se reparte como key externa. Cuando se conoce el `appid`
+de Steam, además aparece un enlace **"Abrir en app de Steam"** (`steam://`)
+para abrirlo directamente en el cliente de escritorio.
 
 ## Configuración
 
