@@ -61,5 +61,8 @@ export async function fetchAppDetails(appid, cc, language) {
     isFree: d.is_free,
     genres: (d.genres ?? []).map((g) => g.description),
     priceOverview: d.price_overview ?? null,
+    achievementsTotal: d.achievements?.total ?? 0,
+    dlcCount: Array.isArray(d.dlc) ? d.dlc.length : 0,
+    hasTrailer: Array.isArray(d.movies) && d.movies.length > 0,
   };
 }

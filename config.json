@@ -2,9 +2,12 @@
   "countryCode": "us",
   "language": "spanish",
   "quality": {
-    "minTotalReviews": 500,
-    "minPositivePercent": 70,
+    "minTotalReviews": 1000,
+    "minPositivePercent": 80,
     "minAvgPlaytimeMinutes": 60,
-    "metacriticOverride": 80
+    "metacriticOverride": 80,
+    "recentReviewMinSample": 10,
+    "minCurrentPlayers": 0,
+    "excludeGenres": []
   }
 }

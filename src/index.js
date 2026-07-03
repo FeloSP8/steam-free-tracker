@@ -4,7 +4,12 @@ import { fileURLToPath } from "node:url";
 
 import { fetchFeaturedFreeGames, fetchAppDetails, resolveAppIdByTitle } from "./steamApi.js";
 import { fetchSteamGiveaways } from "./gamerPower.js";
-import { fetchReviewSummary, fetchSteamSpy } from "./reviews.js";
+import {
+  fetchReviewSummary,
+  fetchRecentReviewSummary,
+  fetchSteamSpy,
+  fetchCurrentPlayerCount,
+} from "./reviews.js";
 import { evaluateGame } from "./scoring.js";
 import { readSeen, writeSeen } from "./state.js";
 import { buildEmailHtml, sendEmail } from "./email.js";
@@ -83,10 +88,12 @@ async function main() {
 
     await sleep(300); // ritmo suave para no saturar las APIs publicas
 
-    const [appDetails, reviews, steamspy] = await Promise.all([
+    const [appDetails, reviews, recentReviews, steamspy, currentPlayers] = await Promise.all([
       fetchAppDetails(candidate.appid, config.countryCode, config.language),
       fetchReviewSummary(candidate.appid, config.language),
+      fetchRecentReviewSummary(candidate.appid, config.language),
       fetchSteamSpy(candidate.appid),
+      fetchCurrentPlayerCount(candidate.appid),
     ]);
 
     if (appDetails && appDetails.type !== "game") continue; // DLC, software, OST...
@@ -105,7 +112,14 @@ async function main() {
     }
 
     const name = appDetails?.name ?? candidate.title ?? candidate.name;
-    const evaluation = evaluateGame({ reviews, steamspy, appDetails, quality: config.quality });
+    const evaluation = evaluateGame({
+      reviews,
+      recentReviews,
+      steamspy,
+      appDetails,
+      currentPlayers,
+      quality: config.quality,
+    });
 
     const game = {
       appid: candidate.appid,

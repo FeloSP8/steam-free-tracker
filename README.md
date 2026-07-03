@@ -11,16 +11,37 @@ Un juego gratis pasa el filtro solo si cumple **todos** estos criterios
 
 | Criterio | Por qué importa | Umbral por defecto |
 |---|---|---|
-| **Número total de reseñas** | Evita juegos con pocas reseñas donde el % no es fiable (5 reseñas al 100% no dice nada) | ≥ 500 |
-| **% de reseñas positivas** | Señal principal de calidad percibida por quienes lo jugaron | ≥ 70% |
+| **Número total de reseñas** | Evita juegos con pocas reseñas donde el % no es fiable (20 reseñas al 95% es ruido estadístico) | ≥ 1000 |
+| **% de reseñas positivas** | Señal principal de calidad percibida. Steam usa un algoritmo bayesiano, no un % simple | ≥ 80% ("Muy positivas" o mejor) |
 | **Horas de juego medias** (SteamSpy) | Un juego con reseñas buenas pero que la gente abandona a los 10 minutos no es tan interesante | ≥ 60 min de media |
-| **Metacritic** (si existe) | Se usa como excepción: si un juego no llega al resto de umbrales pero tiene Metacritic ≥ 80, se acepta igual | override en 80 |
+| **Reseñas recientes vs. históricas** | Si el sentimiento de los últimos 30 días es notablemente peor que el histórico, indica soporte abandonado, servidores caídos o un parche roto — se **rechaza aunque el histórico sea excelente**, y este veto no lo anula ni un Metacritic alto | rechazo si % reciente (con ≥10 reseñas de muestra) cae por debajo del umbral de % positivas |
+| **Metacritic** (si existe) | Excepción: si un juego no llega al resto de umbrales pero tiene Metacritic ≥ 80, se acepta igual (salvo que aplique el veto de deterioro reciente) | override en 80 |
+| **Jugadores concurrentes actuales** | Desactivado por defecto — un juego narrativo/singleplayer excelente puede tener pocos jugadores simultáneos sin que eso sea un problema. Actívalo (`minCurrentPlayers`) si te importa sobre todo el multijugador/live-service | 0 (sin filtro) |
+| **Género excluido** | Lista opcional (`excludeGenres`) para descartar categorías que no te interesan (p. ej. `"Casino"`) | `[]` (sin filtro) |
+
+Solo se evalúan apps de tipo `game` (se excluyen DLC, bandas sonoras, software).
 
 Los juegos gratis que **no** pasan el filtro no se descartan silenciosamente:
 aparecen en una sección secundaria del correo ("también gratis, pero no
 cumplen el criterio") para que puedas decidir tú si te interesan.
 
-Solo se evalúan apps de tipo `game` (se excluyen DLC, bandas sonoras, software).
+### Señales informativas (no filtran, pero se muestran en el correo)
+
+Para ayudarte a detectar asset-flips/shovelware de un vistazo, cada juego
+recomendado muestra también: **jugadores activos ahora mismo** (API oficial
+de Steam), **número de logros**, **número de DLC**, si tiene **trailer
+propio** y sus **géneros**. Pocos logros + sin trailer + género genérico son
+señales típicas de un asset-flip, pero no son garantía por sí solas, así que
+se dejan como información y no como filtro automático.
+
+> **Lo que no se automatiza:** detectar si un developer/publisher tiene un
+> catálogo enorme de juegos casi idénticos (red flag clásica de asset-flips
+> en cadena) requeriría scraping de búsquedas por desarrollador, sin una API
+> fiable disponible. Tampoco se usa SteamDB para el pico de jugadores de
+> 24h — su API no es pública y raspar su web incumpliría sus términos; en su
+> lugar se usa el endpoint oficial `ISteamUserStats/GetNumberOfCurrentPlayers`
+> de Steam, que da los jugadores concurrentes ahora mismo (sin el histórico
+> de picos, pero sin depender de scraping).
 
 ## Cómo detecta que un juego "pasa a ser gratis"
 
@@ -90,10 +111,13 @@ consultas a Steam:
   "countryCode": "us",
   "language": "spanish",
   "quality": {
-    "minTotalReviews": 500,
-    "minPositivePercent": 70,
+    "minTotalReviews": 1000,
+    "minPositivePercent": 80,
     "minAvgPlaytimeMinutes": 60,
-    "metacriticOverride": 80
+    "metacriticOverride": 80,
+    "recentReviewMinSample": 10,
+    "minCurrentPlayers": 0,
+    "excludeGenres": []
   }
 }
 ```
