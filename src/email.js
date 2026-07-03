@@ -16,6 +16,15 @@ function gameCardHtml(game) {
       ? `${(game.avgPlaytimeMinutes / 60).toFixed(1)}h de media jugadas`
       : "sin datos de horas jugadas";
 
+  const signals = [];
+  if (game.currentPlayers !== null && game.currentPlayers !== undefined) {
+    signals.push(`${game.currentPlayers.toLocaleString("es-ES")} jugando ahora`);
+  }
+  if (game.achievementsTotal) signals.push(`${game.achievementsTotal} logros`);
+  if (game.dlcCount) signals.push(`${game.dlcCount} DLC`);
+  if (game.hasTrailer === false) signals.push("sin trailer propio ⚠️");
+  if (game.genres?.length) signals.push(escapeHtml(game.genres.slice(0, 3).join(", ")));
+
   return `
   <tr>
     <td style="padding:16px 0;border-bottom:1px solid #333;">
@@ -38,6 +47,11 @@ function gameCardHtml(game) {
             ${
               game.metacritic
                 ? `<p style="margin:0 0 4px 0;font-size:13px;color:#ccc;">Metacritic: ${game.metacritic}</p>`
+                : ""
+            }
+            ${
+              signals.length > 0
+                ? `<p style="margin:0 0 4px 0;font-size:12px;color:#888;">${signals.join(" · ")}</p>`
                 : ""
             }
             <p style="margin:8px 0 0 0;">
@@ -118,7 +132,7 @@ export function buildEmailHtml({ qualifying, rejected, unverified, dateLabel }) 
     <h2 style="margin:0 0 4px 0;">Juegos gratis en Steam — ${escapeHtml(dateLabel)}</h2>
     <p style="margin:0 0 16px 0;color:#999;font-size:13px;">
       Resumen diario automático. Solo se destacan los que cumplen el filtro de calidad
-      (reseñas, % positivas, horas medias jugadas).
+      (nº de reseñas, % positivas, horas medias jugadas, sin deterioro reciente).
     </p>
     <table cellpadding="0" cellspacing="0" width="100%">${qualifyingHtml}</table>
     ${rejectedHtml}
