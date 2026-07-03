@@ -1,0 +1,17 @@
+{
+  "name": "steam-free-tracker",
+  "version": "1.0.0",
+  "description": "Detecta juegos de Steam que pasan a ser gratuitos, filtra los que merecen la pena y envia un resumen por email.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "nodemailer": "^9.0.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
