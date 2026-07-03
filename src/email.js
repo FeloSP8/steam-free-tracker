@@ -99,7 +99,11 @@ function unverifiedRowHtml(game) {
   </tr>`;
 }
 
-export function buildEmailHtml({ qualifying, rejected, unverified, dateLabel }) {
+export function buildEmailHtml({ qualifying, rejected, unverified, dateLabel, banner }) {
+  const bannerHtml = banner
+    ? `<p style="margin:0 0 16px 0;padding:10px 12px;background:#4a3200;border:1px solid #a06b00;border-radius:4px;color:#ffd479;font-size:12px;">${escapeHtml(banner)}</p>`
+    : "";
+
   const qualifyingHtml =
     qualifying.length > 0
       ? qualifying.map(gameCardHtml).join("")
@@ -130,6 +134,7 @@ export function buildEmailHtml({ qualifying, rejected, unverified, dateLabel }) 
   return `
   <div style="font-family:Arial,Helvetica,sans-serif;background:#1b2838;color:#fff;padding:24px;max-width:640px;margin:0 auto;">
     <h2 style="margin:0 0 4px 0;">Juegos gratis en Steam — ${escapeHtml(dateLabel)}</h2>
+    ${bannerHtml}
     <p style="margin:0 0 16px 0;color:#999;font-size:13px;">
       Resumen diario automático. Solo se destacan los que cumplen el filtro de calidad
       (nº de reseñas, % positivas, horas medias jugadas, sin deterioro reciente).
