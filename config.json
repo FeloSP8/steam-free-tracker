@@ -6,9 +6,5 @@
     "minPositivePercent": 70,
     "minAvgPlaytimeMinutes": 60,
     "metacriticOverride": 80
-  },
-  "search": {
-    "maxSearchPages": 3,
-    "resultsPerPage": 100
   }
 }

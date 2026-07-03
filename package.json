@@ -8,7 +8,6 @@
     "start": "node src/index.js"
   },
   "dependencies": {
-    "cheerio": "^1.0.0",
     "nodemailer": "^9.0.3"
   },
   "engines": {
