@@ -9,5 +9,9 @@
     "recentReviewMinSample": 10,
     "minCurrentPlayers": 0,
     "excludeGenres": []
+  },
+  "search": {
+    "maxSearchPages": 3,
+    "resultsPerPage": 100
   }
 }

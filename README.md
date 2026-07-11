@@ -45,16 +45,26 @@ se dejan como información y no como filtro automático.
 
 ## Cómo detecta que un juego "pasa a ser gratis"
 
-Se combinan dos fuentes públicas, ninguna requiere API key ni login:
+Se combinan tres fuentes públicas, ninguna requiere API key ni login:
 
 1. **[GamerPower](https://www.gamerpower.com/api/giveaways?platform=steam&type=game)**
    — agregador dedicado a giveaways, filtrado a juegos completos en Steam.
-   Cubre tanto ofertas 100% en la tienda de Steam como keys repartidas a
-   través de partners. Fuente principal por ser la más exhaustiva y estable
-   (JSON diseñado para esto, no scraping).
+   Cubre keys repartidas a través de partners y giveaways con mecanismo de
+   reclamo externo. **No cubre** un editor que simplemente pone su propio
+   juego a $0 directamente en su ficha de Steam sin ninguna key ni sitio
+   externo — para eso está la fuente 3.
 2. `store.steampowered.com/api/featuredcategories` — ofertas destacadas en
-   portada de Steam, como red de seguridad por si algo no apareciera aún
-   en GamerPower.
+   portada de Steam. Solo trae el top-10 rotativo de la home, no el catálogo
+   completo de rebajas: un indie con buena nota rara vez entra ahí.
+3. **Búsqueda de la tienda** (`search/results/?specials=1&maxprice=free`)
+   — barrido de varias páginas de resultados filtrando por precio final 0.
+   Cubre el hueco que dejan las otras dos: promociones temporales al 100%
+   que el propio editor activa en su página sin pasar por un giveaway
+   formal ni aparecer en el top-10 de portada. Es la fuente más frágil
+   (Steam no lo expone como JSON limpio, se parsea el HTML de la página de
+   búsqueda con `cheerio`) — si Steam cambia las clases de ese HTML, esta
+   fuente puede dejar de encontrar resultados silenciosamente (nunca
+   falsos positivos, en el peor caso encuentra menos de lo que hay).
 
 Cuando el giveaway de GamerPower no enlaza directamente a la ficha de Steam
 (p. ej. una key repartida por un partner), se intenta resolver el `appid`
@@ -118,6 +128,10 @@ consultas a Steam:
     "recentReviewMinSample": 10,
     "minCurrentPlayers": 0,
     "excludeGenres": []
+  },
+  "search": {
+    "maxSearchPages": 3,
+    "resultsPerPage": 100
   }
 }
 ```

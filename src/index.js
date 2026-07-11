@@ -2,7 +2,12 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { fetchFeaturedFreeGames, fetchAppDetails, resolveAppIdByTitle } from "./steamApi.js";
+import {
+  fetchFeaturedFreeGames,
+  fetchSearchFreeGames,
+  fetchAppDetails,
+  resolveAppIdByTitle,
+} from "./steamApi.js";
 import { fetchSteamGiveaways } from "./gamerPower.js";
 import {
   fetchReviewSummary,
@@ -35,8 +40,9 @@ function stateKey(candidate) {
 }
 
 async function collectCandidates(config) {
-  const [featured, giveaways] = await Promise.all([
+  const [featured, searchResults, giveaways] = await Promise.all([
     fetchFeaturedFreeGames(config.countryCode, config.language),
+    fetchSearchFreeGames(config.countryCode, config.language, config.search),
     fetchSteamGiveaways(),
   ]);
 
@@ -49,7 +55,7 @@ async function collectCandidates(config) {
   );
 
   const merged = new Map();
-  for (const item of [...featured, ...resolved]) {
+  for (const item of [...featured, ...searchResults, ...resolved]) {
     const key = item.appid ? `appid:${item.appid}` : `gp:${item.gamerPowerId}`;
     if (!merged.has(key)) merged.set(key, item);
   }

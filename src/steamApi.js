@@ -1,3 +1,5 @@
+import * as cheerio from "cheerio";
+
 const STORE_BASE = "https://store.steampowered.com";
 
 /**
@@ -20,6 +22,69 @@ export async function fetchFeaturedFreeGames(cc, language) {
       claimUrl: `${STORE_BASE}/app/${item.id}`,
       source: "steam-featured",
     }));
+}
+
+/**
+ * Barrido de la busqueda de la tienda filtrando por ofertas con precio final
+ * 0. Cubre un hueco real que ni GamerPower ni featuredcategories detectan:
+ * un editor que pone su propio juego a $0 directamente en su ficha de Steam
+ * durante unos dias, sin key externa ni giveaway formal (featuredcategories
+ * solo trae el top-10 rotativo de portada; GamerPower solo cubre giveaways
+ * con reclamo externo). Steam no expone esto como JSON limpio, asi que se
+ * parsea el fragmento HTML que devuelve la propia pagina de busqueda.
+ *
+ * Es la parte mas fragil del sistema: si Steam cambia las clases del HTML
+ * de busqueda, esta funcion puede dejar de encontrar resultados (fallara en
+ * silencio, devolviendo menos o cero items, nunca falsos positivos).
+ */
+export async function fetchSearchFreeGames(cc, language, { maxSearchPages, resultsPerPage }) {
+  const found = new Map();
+
+  for (let page = 0; page < maxSearchPages; page++) {
+    const start = page * resultsPerPage;
+    const url =
+      `${STORE_BASE}/search/results/?query&start=${start}&count=${resultsPerPage}` +
+      `&specials=1&maxprice=free&category1=998&cc=${cc}&l=${language}&json=1`;
+
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (steam-free-tracker daily job)" },
+    });
+    if (!res.ok) break;
+
+    const data = await res.json();
+    const html = data?.results_html;
+    if (!html) break;
+
+    const $ = cheerio.load(html);
+    const rows = $("a.search_result_row");
+    if (rows.length === 0) break;
+
+    rows.each((_, el) => {
+      const appid = Number($(el).attr("data-ds-appid"));
+      if (!appid) return;
+      const name = $(el).find(".title").text().trim();
+      const discountPercentText = $(el).find(".discount_pct").text().trim();
+      const discountPercent = discountPercentText
+        ? Math.abs(parseInt(discountPercentText.replace(/[^0-9]/g, ""), 10))
+        : null;
+
+      // Solo descuentos confirmados al 100%. Si no se pudo parsear el
+      // porcentaje, se descarta en vez de arriesgarnos a un falso positivo
+      // (p.ej. un F2P de toda la vida coincidiendo con maxprice=free).
+      if (discountPercent !== 100) return;
+
+      found.set(appid, {
+        appid,
+        name,
+        claimUrl: `${STORE_BASE}/app/${appid}`,
+        source: "steam-search",
+      });
+    });
+
+    if (Number(data.total_count) <= start + resultsPerPage) break;
+  }
+
+  return Array.from(found.values());
 }
 
 /**
