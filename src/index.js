@@ -88,6 +88,7 @@ async function main() {
         claimUrl: candidate.openUrl,
         worth: candidate.worth,
         endDate: candidate.endDate,
+        headerImage: candidate.image ?? null,
       });
       continue;
     }
@@ -146,10 +147,20 @@ async function main() {
     });
 
     const html = buildEmailHtml({ qualifying, rejected, unverified, dateLabel });
-    const subject =
-      qualifying.length > 0
-        ? `🎮 ${qualifying.length} juego(s) gratis que merecen la pena — ${dateLabel}`
-        : `Steam gratis hoy: nada que destaque — ${dateLabel}`;
+    const others = rejected.length + unverified.length;
+
+    // El asunto solo dice "nada que destaque" cuando el correo esta
+    // literalmente vacio de contenido. Si hay algo en "rejected" o
+    // "unverified" (aunque no haya pasado el filtro de calidad), el asunto
+    // lo refleja para no dar la impresion de que no hay nada que mirar.
+    let subject;
+    if (qualifying.length > 0) {
+      subject = `🎮 ${qualifying.length} juego(s) gratis que merecen la pena — ${dateLabel}`;
+    } else if (others > 0) {
+      subject = `Steam gratis hoy: ${others} sin destacar, revisa el correo — ${dateLabel}`;
+    } else {
+      subject = `Steam gratis hoy: nada que destacar — ${dateLabel}`;
+    }
 
     await sendEmail({ subject, html });
     console.log("Email enviado.");

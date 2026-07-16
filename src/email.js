@@ -91,10 +91,23 @@ function unverifiedRowHtml(game) {
   const end = game.endDate && game.endDate !== "N/A" ? ` · hasta ${escapeHtml(game.endDate)}` : "";
   return `
   <tr>
-    <td style="padding:6px 0;font-size:13px;color:#999;border-bottom:1px solid #222;">
-      <strong style="color:#ccc;">${escapeHtml(game.name)}</strong> —
-      <a href="${escapeHtml(game.claimUrl)}" style="color:#1a9fff;">reclamar</a>
-      ${worth}${end}
+    <td style="padding:10px 0;font-size:13px;color:#999;border-bottom:1px solid #222;">
+      <table cellpadding="0" cellspacing="0" width="100%">
+        <tr>
+          ${
+            game.headerImage
+              ? `<td width="92" valign="top" style="padding-right:12px;">
+                   <img src="${escapeHtml(game.headerImage)}" width="92" style="border-radius:4px;display:block;" />
+                 </td>`
+              : ""
+          }
+          <td valign="top">
+            <strong style="color:#ccc;">${escapeHtml(game.name)}</strong> —
+            <a href="${escapeHtml(game.claimUrl)}" style="color:#1a9fff;">reclamar</a>
+            ${worth}${end}
+          </td>
+        </tr>
+      </table>
     </td>
   </tr>`;
 }
