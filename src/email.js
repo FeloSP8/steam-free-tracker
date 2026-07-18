@@ -156,6 +156,15 @@ export function buildEmailHtml({ qualifying, rejected, unverified, dateLabel }) 
   </div>`;
 }
 
+// Enmascara direcciones para poder registrarlas en los logs de GitHub
+// Actions sin publicar correos de nadie (este repo es publico).
+function maskEmail(address) {
+  const [local, domain] = address.trim().split("@");
+  if (!domain) return "***";
+  const visible = local.slice(0, 2);
+  return `${visible}${"*".repeat(Math.max(local.length - 2, 1))}@${domain}`;
+}
+
 export async function sendEmail({ subject, html }) {
   const { GMAIL_USER, GMAIL_APP_PASSWORD, EMAIL_TO } = process.env;
   if (!GMAIL_USER || !GMAIL_APP_PASSWORD || !EMAIL_TO) {
@@ -169,10 +178,21 @@ export async function sendEmail({ subject, html }) {
     auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
   });
 
-  await transporter.sendMail({
+  const recipients = EMAIL_TO.split(",").map((a) => a.trim()).filter(Boolean);
+  console.log(`Destinatarios configurados (${recipients.length}): ${recipients.map(maskEmail).join(", ")}`);
+
+  const info = await transporter.sendMail({
     from: `"Steam Free Tracker" <${GMAIL_USER}>`,
     to: EMAIL_TO,
     subject,
     html,
   });
+
+  // accepted/rejected vienen del propio servidor SMTP de Gmail: si una
+  // direccion esta mal escrita o no existe, aparece aqui como rechazada
+  // en el momento del envio, sin necesidad de adivinar por que no llego.
+  console.log(`Aceptados por Gmail: ${(info.accepted ?? []).map(maskEmail).join(", ") || "ninguno"}`);
+  if (info.rejected && info.rejected.length > 0) {
+    console.log(`Rechazados por Gmail: ${info.rejected.map(maskEmail).join(", ")}`);
+  }
 }
