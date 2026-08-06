@@ -39,12 +39,51 @@ function stateKey(candidate) {
   return candidate.appid ? `steam:${candidate.appid}` : `gp:${candidate.gamerPowerId}`;
 }
 
+// Como es gratis un juego ahora mismo. Antes se descartaba cualquier
+// candidato al que Steam siguiera poniendo precio, y eso borraba justo los
+// dos casos mas interesantes: las promociones "free to keep" (donde el precio
+// del paquete no cambia) y los giveaways de key externa. Ahora se etiqueta en
+// vez de descartarse, que es lo que permite decidir con criterio.
+function classifyAvailability(appDetails) {
+  const price = appDetails.priceOverview;
+
+  if (appDetails.freeToKeep) {
+    return {
+      kind: "steam-free-to-keep",
+      label: "Regalo de Steam: pulsa «Añadir a la cuenta» y es tuyo para siempre",
+    };
+  }
+
+  if (price?.discount_percent === 100 || price?.final === 0) {
+    return { kind: "steam-discount", label: "Gratis en Steam ahora mismo (-100%)" };
+  }
+
+  if (appDetails.isFree) {
+    return { kind: "free-to-play", label: "Free to play (no es una promocion temporal)" };
+  }
+
+  if (price) {
+    const amount = (price.final / 100).toFixed(2);
+    return {
+      kind: "external-key",
+      label: `Key de giveaway externo — en Steam sigue costando ${amount} ${price.currency}`,
+    };
+  }
+
+  return { kind: "unknown", label: "Steam no informa del precio de este juego" };
+}
+
 async function collectCandidates(config) {
   const [featured, searchResults, giveaways] = await Promise.all([
     fetchFeaturedFreeGames(config.countryCode, config.language),
     fetchSearchFreeGames(config.countryCode, config.language, config.search),
     fetchSteamGiveaways(),
   ]);
+
+  console.log(
+    `Fuentes — portada: ${featured.length}, busqueda: ${searchResults.length}, ` +
+      `GamerPower: ${giveaways.length}`
+  );
 
   const resolved = await Promise.all(
     giveaways.map(async (g) => {
@@ -56,7 +95,7 @@ async function collectCandidates(config) {
 
   const merged = new Map();
   for (const item of [...featured, ...searchResults, ...resolved]) {
-    const key = item.appid ? `appid:${item.appid}` : `gp:${item.gamerPowerId}`;
+    const key = stateKey(item);
     if (!merged.has(key)) merged.set(key, item);
   }
   return Array.from(merged.values());
@@ -77,8 +116,6 @@ async function main() {
   const unverified = [];
 
   for (const candidate of unseen) {
-    seen.add(stateKey(candidate));
-
     // Sin appid no hay forma de consultar reseñas/horas jugadas de Steam:
     // se informa igualmente pero marcado como sin verificar, en vez de
     // descartarlo o colarlo como si hubiera pasado el filtro de calidad.
@@ -90,6 +127,7 @@ async function main() {
         endDate: candidate.endDate,
         headerImage: candidate.image ?? null,
       });
+      seen.add(stateKey(candidate));
       continue;
     }
 
@@ -103,22 +141,28 @@ async function main() {
       fetchCurrentPlayerCount(candidate.appid),
     ]);
 
-    if (appDetails && appDetails.type !== "game") continue; // DLC, software, OST...
-
-    // El giveaway de featuredcategories ya viene verificado al 100% de
-    // descuento. El de GamerPower puede apuntar a un appid resuelto por
-    // titulo (aproximado): si Steam confirma que ese appid SI tiene precio
-    // normal y no esta a 0, es un falso positivo y se descarta.
-    const priceOverview = appDetails?.priceOverview;
-    if (priceOverview && priceOverview.discount_percent !== 100 && priceOverview.final !== 0) {
-      console.log(
-        `Descartado falso positivo: ${appDetails?.name ?? candidate.title} ` +
-          `(precio actual: ${priceOverview.final / 100} ${priceOverview.currency})`
+    // Sin ficha de Steam no se puede ni clasificar ni puntuar. Es un fallo
+    // temporal (429, corte de red), no una decision: no se marca como visto
+    // para que la siguiente ejecucion lo reintente en vez de silenciarlo.
+    if (!appDetails) {
+      console.warn(
+        `Sin ficha de Steam para ${candidate.title ?? candidate.name} ` +
+          `(appid ${candidate.appid}); se reintentara en la proxima ejecucion.`
       );
       continue;
     }
 
-    const name = appDetails?.name ?? candidate.title ?? candidate.name;
+    seen.add(stateKey(candidate));
+
+    if (appDetails.type !== "game") {
+      console.log(`Descartado por tipo "${appDetails.type}": ${appDetails.name}`);
+      continue; // DLC, software, OST...
+    }
+
+    const availability = classifyAvailability(appDetails);
+    console.log(`${appDetails.name}: ${availability.label}`);
+
+    const name = appDetails.name ?? candidate.title ?? candidate.name;
     const evaluation = evaluateGame({
       reviews,
       recentReviews,
@@ -131,8 +175,15 @@ async function main() {
     const game = {
       appid: candidate.appid,
       name,
-      headerImage: appDetails?.headerImage ?? null,
-      claimUrl: candidate.claimUrl ?? candidate.openUrl ?? `https://store.steampowered.com/app/${candidate.appid}`,
+      headerImage: appDetails.headerImage ?? null,
+      // En un regalo de Steam el sitio donde se reclama es la propia ficha,
+      // no el enlace del agregador: es donde esta el boton "Añadir a la cuenta".
+      claimUrl:
+        availability.kind.startsWith("steam-")
+          ? `https://store.steampowered.com/app/${candidate.appid}`
+          : candidate.claimUrl ?? candidate.openUrl ?? `https://store.steampowered.com/app/${candidate.appid}`,
+      availability,
+      endDate: candidate.endDate ?? null,
       ...evaluation,
     };
 

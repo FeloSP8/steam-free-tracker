@@ -25,6 +25,17 @@ function gameCardHtml(game) {
   if (game.hasTrailer === false) signals.push("sin trailer propio ⚠️");
   if (game.genres?.length) signals.push(escapeHtml(game.genres.slice(0, 3).join(", ")));
 
+  // Un regalo de Steam y una key de un agregador se reclaman de forma
+  // distinta y caducan de forma distinta: decirlo evita abrir la ficha y no
+  // entender por que no aparece el boton de gratis.
+  const availability = game.availability
+    ? `<p style="margin:0 0 6px 0;font-size:13px;color:${
+        game.availability.kind.startsWith("steam-") ? "#a4d007" : "#c0a060"
+      };">${escapeHtml(game.availability.label)}${
+        game.endDate && game.endDate !== "N/A" ? ` · hasta ${escapeHtml(game.endDate)}` : ""
+      }</p>`
+    : "";
+
   return `
   <tr>
     <td style="padding:16px 0;border-bottom:1px solid #333;">
@@ -39,6 +50,7 @@ function gameCardHtml(game) {
           </td>
           <td style="padding-left:16px;" valign="top">
             <h3 style="margin:0 0 6px 0;font-size:17px;">${escapeHtml(game.name)}</h3>
+            ${availability}
             <p style="margin:0 0 4px 0;font-size:13px;color:#ccc;">
               ${escapeHtml(game.reviewScoreDesc ?? "Sin valoración")} · ${game.positivePercent}% positivas
               · ${game.totalReviews.toLocaleString("es-ES")} reseñas
@@ -81,6 +93,7 @@ function rejectedRowHtml(game) {
     <td style="padding:6px 0;font-size:13px;color:#999;border-bottom:1px solid #222;">
       <strong style="color:#ccc;">${escapeHtml(game.name)}</strong> —
       <a href="${escapeHtml(game.claimUrl)}" style="color:#1a9fff;">ver</a>
+      ${game.availability ? `· ${escapeHtml(game.availability.label)}` : ""}
       · ${escapeHtml(game.reasons.join(", "))}
     </td>
   </tr>`;

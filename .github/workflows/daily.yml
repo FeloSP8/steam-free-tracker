@@ -2,8 +2,12 @@ name: Steam Free Games Daily Check
 
 on:
   schedule:
-    # 09:00 UTC = 10:00/11:00 hora de España según horario de verano
-    - cron: "0 9 * * *"
+    # Cada 6 horas. Los regalos de Steam duran pocos días y empiezan a
+    # cualquier hora (Moonlighter arrancó a las 17:00 UTC), así que una única
+    # pasada diaria a las 09:00 UTC dejaba ciega la mayor parte del día.
+    # Solo se avisa de lo que no se había visto antes, así que más pasadas
+    # no significan más correos.
+    - cron: "0 */6 * * *"
   workflow_dispatch: {}
 
 permissions:
