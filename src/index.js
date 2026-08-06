@@ -44,33 +44,42 @@ function stateKey(candidate) {
 // dos casos mas interesantes: las promociones "free to keep" (donde el precio
 // del paquete no cambia) y los giveaways de key externa. Ahora se etiqueta en
 // vez de descartarse, que es lo que permite decidir con criterio.
+// `badge` es la etiqueta corta que va en la pastilla del correo; `detail` es
+// la letra pequeña de debajo. Separarlos evita el parrafo de cuatro lineas de
+// colores que salia antes en el movil.
 function classifyAvailability(appDetails) {
   const price = appDetails.priceOverview;
 
   if (appDetails.freeToKeep) {
     return {
       kind: "steam-free-to-keep",
-      label: "Regalo de Steam: pulsa «Añadir a la cuenta» y es tuyo para siempre",
+      badge: "🎁 Regalo de Steam · tuyo para siempre",
+      detail: "Pulsa «Añadir a la cuenta» en la ficha del juego",
     };
   }
 
   if (price?.discount_percent === 100 || price?.final === 0) {
-    return { kind: "steam-discount", label: "Gratis en Steam ahora mismo (-100%)" };
+    return { kind: "steam-discount", badge: "Gratis en Steam · -100%", detail: null };
   }
 
   if (appDetails.isFree) {
-    return { kind: "free-to-play", label: "Free to play (no es una promocion temporal)" };
+    return {
+      kind: "free-to-play",
+      badge: "Free to play",
+      detail: "No es una promocion temporal",
+    };
   }
 
   if (price) {
     const amount = (price.final / 100).toFixed(2);
     return {
       kind: "external-key",
-      label: `Key de giveaway externo — en Steam sigue costando ${amount} ${price.currency}`,
+      badge: "Key de giveaway externo",
+      detail: `En Steam sigue costando ${amount} ${price.currency}`,
     };
   }
 
-  return { kind: "unknown", label: "Steam no informa del precio de este juego" };
+  return { kind: "unknown", badge: "Gratis", detail: "Steam no informa del precio" };
 }
 
 async function collectCandidates(config) {
@@ -160,7 +169,10 @@ async function main() {
     }
 
     const availability = classifyAvailability(appDetails);
-    console.log(`${appDetails.name}: ${availability.label}`);
+    console.log(
+      `${appDetails.name}: ${availability.badge}` +
+        (availability.detail ? ` (${availability.detail})` : "")
+    );
 
     const name = appDetails.name ?? candidate.title ?? candidate.name;
     const evaluation = evaluateGame({
