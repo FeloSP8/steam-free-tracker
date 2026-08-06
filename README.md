@@ -1,8 +1,9 @@
 # steam-free-tracker
 
-Proceso diario que detecta juegos de Steam que **pasan a ser gratuitos**
-(ofertas al 100% de descuento), filtra los que realmente merecen la pena y
-te envía un resumen por email con un enlace directo para reclamarlos.
+Proceso automático que detecta juegos de Steam que **pasan a ser gratuitos**
+(descuentos al 100%, regalos "free to keep" de Steam y keys de giveaways
+externos), filtra los que realmente merecen la pena y te envía un resumen
+por email con un enlace directo para reclamarlos.
 
 ## Cómo decide qué juego "merece la pena"
 
@@ -49,10 +50,12 @@ Se combinan tres fuentes públicas, ninguna requiere API key ni login:
 
 1. **[GamerPower](https://www.gamerpower.com/api/giveaways?platform=steam&type=game)**
    — agregador dedicado a giveaways, filtrado a juegos completos en Steam.
-   Cubre keys repartidas a través de partners y giveaways con mecanismo de
-   reclamo externo. **No cubre** un editor que simplemente pone su propio
-   juego a $0 directamente en su ficha de Steam sin ninguna key ni sitio
-   externo — para eso está la fuente 3.
+   Cubre keys repartidas a través de partners, giveaways con mecanismo de
+   reclamo externo y —lo más importante— los regalos **"free to keep"** del
+   propio Steam, que ninguna de las otras dos fuentes puede ver (ver más
+   abajo). **No cubre** un editor que simplemente pone su propio juego a $0
+   directamente en su ficha sin ninguna key ni sitio externo — para eso está
+   la fuente 3.
 2. `store.steampowered.com/api/featuredcategories` — ofertas destacadas en
    portada de Steam. Solo trae el top-10 rotativo de la home, no el catálogo
    completo de rebajas: un indie con buena nota rara vez entra ahí.
@@ -74,13 +77,33 @@ encuentra, el juego se incluye en el correo en una sección aparte
 ("sin datos de reseñas para verificar calidad") en vez de descartarlo o
 colarlo silenciosamente como si hubiera pasado el filtro.
 
-Como verificación cruzada, cualquier candidato con `appid` resuelto se
-contrasta contra la API oficial `appdetails` de Steam: si su precio actual
-no es 0, se descarta como falso positivo.
+### Las dos maneras que tiene Steam de poner un juego a cero
+
+Esto es importante porque solo una de las dos se ve en el precio:
+
+- **Descuento del 100%.** El paquete de siempre baja a 0. Aparece en
+  `specials`, y `price_overview` lo refleja con `discount_percent: 100`.
+  Es el caso que detectan las fuentes 2 y 3.
+- **Promoción "free to keep".** Steam añade un paquete gratuito temporal y
+  la ficha muestra el botón *"Añadir a la cuenta"*, pero **el precio del
+  paquete normal no cambia**: `price_overview` sigue diciendo 19,99 € e
+  `is_free` sigue siendo `false`. Es el formato habitual de los regalos
+  permanentes de Steam (Moonlighter, agosto de 2026) y solo se detecta
+  mirando `package_groups` en busca de un sub con licencia gratuita.
+  **Las fuentes 2 y 3 son ciegas a este caso**: al filtrar por descuento,
+  nunca lo ven. Para estos la fuente útil es GamerPower (1).
+
+Cualquier candidato con `appid` resuelto se contrasta contra la API oficial
+`appdetails` de Steam, pero el resultado se usa para **etiquetar**, no para
+descartar: cada juego del correo indica si es un regalo de Steam, un
+descuento al 100% o una key de un giveaway externo (y en ese caso, cuánto
+sigue costando en Steam). Si `appdetails` no responde, el candidato no se
+marca como visto y se reintenta en la siguiente pasada, en vez de quedar
+silenciado para siempre.
 
 > Limitación conocida: no detecta el caso raro de un juego que cambia
 > permanentemente su modelo a Free-to-Play sin pasar por ningún giveaway
-> ni oferta (ninguna de las dos fuentes lo reportaría).
+> ni oferta (ninguna de las fuentes lo reportaría).
 
 El estado de qué juegos ya se han notificado se guarda en `data/seen.json`
 (por `appid` de Steam, o por id de GamerPower si no se pudo resolver uno)
@@ -138,8 +161,11 @@ consultas a Steam:
 
 ### 3. Activar el cron
 
-El workflow en `.github/workflows/daily.yml` corre todos los días a las
-09:00 UTC. **GitHub solo ejecuta workflows programados (`schedule`) desde
+El workflow en `.github/workflows/daily.yml` corre **cada 6 horas** (00:00,
+06:00, 12:00 y 18:00 UTC). Los regalos de Steam duran pocos días y empiezan
+a cualquier hora, así que una sola pasada diaria dejaba ciega la mayor parte
+del día. Como solo se avisa de lo que no se había visto antes, más pasadas
+no significan más correos. **GitHub solo ejecuta workflows programados (`schedule`) desde
 la rama por defecto del repo**, así que esta rama debe fusionarse a `main`
 para que el cron se active. Mientras tanto puedes lanzarlo manualmente
 desde la pestaña "Actions" → "Steam Free Games Daily Check" → "Run workflow".

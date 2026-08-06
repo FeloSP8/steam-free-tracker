@@ -6,11 +6,18 @@ const STORE_BASE = "https://store.steampowered.com";
  * Ofertas destacadas en portada de Steam (JSON oficial, sin scraping).
  * Suele incluir los "juegos gratis" mas relevantes, pero no es exhaustiva:
  * por eso se combina con GamerPower en index.js.
+ *
+ * Ojo con su punto ciego: "specials" son descuentos, asi que aqui solo
+ * aparecen los juegos a -100%. Las promociones "free to keep" de Steam no
+ * son un descuento (ver detectFreeToKeep) y NUNCA salen por esta via.
  */
 export async function fetchFeaturedFreeGames(cc, language) {
   const url = `${STORE_BASE}/api/featuredcategories?cc=${cc}&l=${language}`;
   const res = await fetch(url);
-  if (!res.ok) return [];
+  if (!res.ok) {
+    console.warn(`featuredcategories respondio ${res.status}`);
+    return [];
+  }
   const data = await res.json();
   const items = data?.specials?.items ?? [];
 
@@ -36,6 +43,10 @@ export async function fetchFeaturedFreeGames(cc, language) {
  * Es la parte mas fragil del sistema: si Steam cambia las clases del HTML
  * de busqueda, esta funcion puede dejar de encontrar resultados (fallara en
  * silencio, devolviendo menos o cero items, nunca falsos positivos).
+ *
+ * Comparte punto ciego con featuredcategories: al filtrar por descuento del
+ * 100%, las promociones "free to keep" (que no son un descuento) tampoco
+ * aparecen aqui. Para esas la fuente util es GamerPower.
  */
 export async function fetchSearchFreeGames(cc, language, { maxSearchPages, resultsPerPage }) {
   const found = new Map();
@@ -49,7 +60,10 @@ export async function fetchSearchFreeGames(cc, language, { maxSearchPages, resul
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0 (steam-free-tracker daily job)" },
     });
-    if (!res.ok) break;
+    if (!res.ok) {
+      console.warn(`busqueda de la tienda respondio ${res.status} (pagina ${page})`);
+      break;
+    }
 
     const data = await res.json();
     const html = data?.results_html;
@@ -108,10 +122,41 @@ export async function resolveAppIdByTitle(title, cc, language) {
   return (exact ?? items[0]).id;
 }
 
+/**
+ * Steam tiene dos formas muy distintas de poner un juego a cero, y solo una
+ * de ellas se ve en price_overview:
+ *
+ *  1. Descuento del 100%: el paquete de siempre baja a 0. Sale en specials y
+ *     en price_overview con discount_percent = 100.
+ *  2. Promocion "free to keep" (la que uso Moonlighter en agosto de 2026):
+ *     el precio del paquete NO cambia, Steam añade un paquete gratuito
+ *     temporal y la ficha muestra "Añadir a la cuenta". price_overview sigue
+ *     diciendo el precio normal e is_free sigue siendo false.
+ *
+ * La forma (2) es la habitual en los regalos permanentes de Steam y solo se
+ * puede detectar mirando package_groups en busca de un sub con licencia
+ * gratuita. Sin esto, un juego regalado por Steam es indistinguible de uno
+ * que sigue costando dinero.
+ */
+function detectFreeToKeep(d) {
+  const subs = (d.package_groups ?? []).flatMap((g) => g.subs ?? []);
+  const freeSub = subs.find(
+    (s) => s.is_free_license === true || Number(s.price_in_cents_with_discount) === 0
+  );
+  if (!freeSub) return null;
+  return {
+    packageId: freeSub.packageid ?? null,
+    optionText: freeSub.option_text ?? null,
+  };
+}
+
 export async function fetchAppDetails(appid, cc, language) {
   const url = `${STORE_BASE}/api/appdetails?appids=${appid}&cc=${cc}&l=${language}`;
   const res = await fetch(url);
-  if (!res.ok) return null;
+  if (!res.ok) {
+    console.warn(`appdetails ${appid} respondio ${res.status}`);
+    return null;
+  }
   const data = await res.json();
   const entry = data?.[appid];
   if (!entry?.success) return null;
@@ -126,6 +171,7 @@ export async function fetchAppDetails(appid, cc, language) {
     isFree: d.is_free,
     genres: (d.genres ?? []).map((g) => g.description),
     priceOverview: d.price_overview ?? null,
+    freeToKeep: detectFreeToKeep(d),
     achievementsTotal: d.achievements?.total ?? 0,
     dlcCount: Array.isArray(d.dlc) ? d.dlc.length : 0,
     hasTrailer: Array.isArray(d.movies) && d.movies.length > 0,

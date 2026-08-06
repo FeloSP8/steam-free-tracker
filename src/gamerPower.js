@@ -29,10 +29,19 @@ export async function fetchSteamGiveaways() {
   const res = await fetch(url, {
     headers: { "User-Agent": "steam-free-tracker (contacto via github.com/FeloSP8)" },
   });
-  if (!res.ok) return [];
+  // Es la unica fuente que ve las promociones "free to keep" de Steam, asi
+  // que si se cae hay que enterarse: antes devolvia [] en silencio y el
+  // resultado era indistinguible de "hoy no hay nada gratis".
+  if (!res.ok) {
+    console.warn(`GamerPower respondio ${res.status}; no hay giveaways de esta fuente`);
+    return [];
+  }
 
   const data = await res.json();
-  if (!Array.isArray(data)) return [];
+  if (!Array.isArray(data)) {
+    console.warn("GamerPower devolvio una respuesta inesperada (no es una lista)");
+    return [];
+  }
 
   return data.map((g) => ({
     gamerPowerId: g.id,
