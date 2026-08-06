@@ -45,16 +45,38 @@ export async function fetchRecentReviewSummary(appid, language) {
 // SteamSpy solo aporta la media de horas jugadas (dato que Steam no expone
 // publicamente). Si no hay datos (juego muy nuevo o de nicho) devolvemos null
 // y el resto del pipeline lo trata como "desconocido", no como rechazo.
+//
+// Ojo con el cero: desde que Steam hizo privado el tiempo de juego, SteamSpy
+// devuelve average_forever = 0 para muchisimos juegos, y eso significa "no
+// tengo el dato", no "nadie lo ha jugado". Tratarlo como un cero real hacia
+// que cualquier juego sin dato suspendiera el minimo de horas y acabara en la
+// seccion de descartados (le paso a Moonlighter, con 22.000 reseñas). Un
+// juego con reseñas y jugadores activos no puede tener 0 minutos de media.
+function playtimeOrNull(minutes) {
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : null;
+}
+
 export async function fetchSteamSpy(appid) {
   try {
     const url = `${STEAMSPY_BASE}?request=appdetails&appid=${appid}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "steam-free-tracker (contacto via github.com/FeloSP8)" },
+    });
+    if (!res.ok) {
+      console.warn(`SteamSpy ${appid} respondio ${res.status}`);
+      return null;
+    }
     const data = await res.json();
     if (!data || data.average_forever === undefined) return null;
+
+    const averageForeverMinutes = playtimeOrNull(data.average_forever);
+    if (averageForeverMinutes === null) {
+      console.log(`SteamSpy no tiene horas jugadas de ${appid}; se ignora ese criterio`);
+    }
+
     return {
-      averageForeverMinutes: data.average_forever,
-      medianForeverMinutes: data.median_forever,
+      averageForeverMinutes,
+      medianForeverMinutes: playtimeOrNull(data.median_forever),
       owners: data.owners,
     };
   } catch {
