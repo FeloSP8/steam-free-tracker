@@ -184,6 +184,11 @@ async function main() {
           : candidate.claimUrl ?? candidate.openUrl ?? `https://store.steampowered.com/app/${candidate.appid}`,
       availability,
       endDate: candidate.endDate ?? null,
+      // Ya venian en appdetails pero no se usaban: en la seccion de
+      // descartados son justo lo que deja juzgar si el juego te interesa
+      // aunque no haya pasado el filtro.
+      shortDescription: appDetails.shortDescription ?? null,
+      releaseDate: appDetails.releaseDate ?? null,
       ...evaluation,
     };
 

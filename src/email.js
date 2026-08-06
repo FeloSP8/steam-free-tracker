@@ -10,7 +10,35 @@ function steamClientUrl(appid) {
   return `steam://store/${appid}`;
 }
 
-function gameCardHtml(game) {
+// Las dos secciones de juegos con appid usan la misma tarjeta. La de los
+// descartados va atenuada y con la imagen mas pequeña, pero enseña los mismos
+// datos: para decidir si un "no cumple el criterio" te interesa igualmente
+// hace falta ver la portada, la nota y el genero, no solo el motivo del veto.
+const CARD_VARIANTS = {
+  destacado: {
+    imageWidth: 184,
+    titleTag: "h3",
+    titleSize: "17px",
+    titleColor: "#fff",
+    textColor: "#ccc",
+    padding: "16px 0",
+    border: "#333",
+    buttonText: "Reclamar",
+  },
+  secundario: {
+    imageWidth: 120,
+    titleTag: "h4",
+    titleSize: "15px",
+    titleColor: "#ccc",
+    textColor: "#999",
+    padding: "12px 0",
+    border: "#222",
+    buttonText: "Ver en Steam",
+  },
+};
+
+function gameCardHtml(game, variantName = "destacado") {
+  const v = CARD_VARIANTS[variantName];
   const hours =
     game.avgPlaytimeMinutes !== null
       ? `${(game.avgPlaytimeMinutes / 60).toFixed(1)}h de media jugadas`
@@ -23,7 +51,14 @@ function gameCardHtml(game) {
   if (game.achievementsTotal) signals.push(`${game.achievementsTotal} logros`);
   if (game.dlcCount) signals.push(`${game.dlcCount} DLC`);
   if (game.hasTrailer === false) signals.push("sin trailer propio ⚠️");
+  if (game.releaseDate) signals.push(escapeHtml(game.releaseDate));
   if (game.genres?.length) signals.push(escapeHtml(game.genres.slice(0, 3).join(", ")));
+
+  const description = game.shortDescription
+    ? `<p style="margin:0 0 6px 0;font-size:13px;color:${
+        CARD_VARIANTS[variantName].textColor
+      };line-height:1.4;">${escapeHtml(game.shortDescription)}</p>`
+    : "";
 
   // Un regalo de Steam y una key de un agregador se reclaman de forma
   // distinta y caducan de forma distinta: decirlo evita abrir la ficha y no
@@ -36,29 +71,41 @@ function gameCardHtml(game) {
       }</p>`
     : "";
 
+  // En los descartados el motivo del veto es el dato mas importante: es lo
+  // que te deja juzgar si el filtro se ha pasado de estricto para tu gusto.
+  const reasons =
+    variantName === "secundario" && game.reasons?.length
+      ? `<p style="margin:6px 0 0 0;font-size:12px;color:#c07a5a;">
+           No destacado: ${escapeHtml(game.reasons.join(" · "))}
+         </p>`
+      : "";
+
   return `
   <tr>
-    <td style="padding:16px 0;border-bottom:1px solid #333;">
+    <td style="padding:${v.padding};border-bottom:1px solid ${v.border};">
       <table cellpadding="0" cellspacing="0" width="100%">
         <tr>
-          <td width="184" valign="top">
+          <td width="${v.imageWidth}" valign="top">
             ${
               game.headerImage
-                ? `<img src="${escapeHtml(game.headerImage)}" width="184" style="border-radius:6px;display:block;" />`
+                ? `<img src="${escapeHtml(game.headerImage)}" width="${v.imageWidth}" style="border-radius:6px;display:block;" />`
                 : ""
             }
           </td>
           <td style="padding-left:16px;" valign="top">
-            <h3 style="margin:0 0 6px 0;font-size:17px;">${escapeHtml(game.name)}</h3>
+            <${v.titleTag} style="margin:0 0 6px 0;font-size:${v.titleSize};color:${v.titleColor};">
+              ${escapeHtml(game.name)}
+            </${v.titleTag}>
             ${availability}
-            <p style="margin:0 0 4px 0;font-size:13px;color:#ccc;">
+            ${description}
+            <p style="margin:0 0 4px 0;font-size:13px;color:${v.textColor};">
               ${escapeHtml(game.reviewScoreDesc ?? "Sin valoración")} · ${game.positivePercent}% positivas
               · ${game.totalReviews.toLocaleString("es-ES")} reseñas
             </p>
-            <p style="margin:0 0 4px 0;font-size:13px;color:#ccc;">${hours}</p>
+            <p style="margin:0 0 4px 0;font-size:13px;color:${v.textColor};">${hours}</p>
             ${
               game.metacritic
-                ? `<p style="margin:0 0 4px 0;font-size:13px;color:#ccc;">Metacritic: ${game.metacritic}</p>`
+                ? `<p style="margin:0 0 4px 0;font-size:13px;color:${v.textColor};">Metacritic: ${game.metacritic}</p>`
                 : ""
             }
             ${
@@ -66,10 +113,11 @@ function gameCardHtml(game) {
                 ? `<p style="margin:0 0 4px 0;font-size:12px;color:#888;">${signals.join(" · ")}</p>`
                 : ""
             }
+            ${reasons}
             <p style="margin:8px 0 0 0;">
               <a href="${escapeHtml(game.claimUrl)}"
                  style="background:#1a9fff;color:#fff;text-decoration:none;padding:8px 14px;border-radius:4px;font-size:13px;display:inline-block;">
-                 Reclamar
+                 ${v.buttonText}
               </a>
               ${
                 game.appid
@@ -83,18 +131,6 @@ function gameCardHtml(game) {
           </td>
         </tr>
       </table>
-    </td>
-  </tr>`;
-}
-
-function rejectedRowHtml(game) {
-  return `
-  <tr>
-    <td style="padding:6px 0;font-size:13px;color:#999;border-bottom:1px solid #222;">
-      <strong style="color:#ccc;">${escapeHtml(game.name)}</strong> —
-      <a href="${escapeHtml(game.claimUrl)}" style="color:#1a9fff;">ver</a>
-      ${game.availability ? `· ${escapeHtml(game.availability.label)}` : ""}
-      · ${escapeHtml(game.reasons.join(", "))}
     </td>
   </tr>`;
 }
@@ -128,7 +164,7 @@ function unverifiedRowHtml(game) {
 export function buildEmailHtml({ qualifying, rejected, unverified, dateLabel }) {
   const qualifyingHtml =
     qualifying.length > 0
-      ? qualifying.map(gameCardHtml).join("")
+      ? qualifying.map((game) => gameCardHtml(game, "destacado")).join("")
       : `<tr><td style="padding:12px 0;color:#999;">Ningún juego nuevo gratis ha superado el filtro de calidad hoy.</td></tr>`;
 
   const rejectedHtml =
@@ -138,7 +174,7 @@ export function buildEmailHtml({ qualifying, rejected, unverified, dateLabel }) 
         También se han vuelto gratis, pero no cumplen el criterio de calidad
       </h4>
       <table cellpadding="0" cellspacing="0" width="100%">${rejected
-        .map(rejectedRowHtml)
+        .map((game) => gameCardHtml(game, "secundario"))
         .join("")}</table>`
       : "";
 
