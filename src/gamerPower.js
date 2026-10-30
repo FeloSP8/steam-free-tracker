@@ -1,3 +1,5 @@
+import { fetchJson } from "./http.js";
+
 const GAMERPOWER_BASE = "https://www.gamerpower.com/api";
 
 function extractSteamAppId(url) {
@@ -26,18 +28,14 @@ function cleanTitle(rawTitle) {
 // en cada giveaway y en el pie del correo.
 export async function fetchSteamGiveaways() {
   const url = `${GAMERPOWER_BASE}/giveaways?platform=steam&type=game`;
-  const res = await fetch(url, {
+  // Es la unica fuente que ve las promociones "free to keep" de Steam, asi
+  // que si se cae hay que enterarse: fetchJson avisa en el log en vez de
+  // devolver [] en silencio, indistinguible de "hoy no hay nada gratis".
+  const data = await fetchJson(url, {
+    label: "GamerPower",
     headers: { "User-Agent": "steam-free-tracker (contacto via github.com/FeloSP8)" },
   });
-  // Es la unica fuente que ve las promociones "free to keep" de Steam, asi
-  // que si se cae hay que enterarse: antes devolvia [] en silencio y el
-  // resultado era indistinguible de "hoy no hay nada gratis".
-  if (!res.ok) {
-    console.warn(`GamerPower respondio ${res.status}; no hay giveaways de esta fuente`);
-    return [];
-  }
-
-  const data = await res.json();
+  if (data === null) return [];
   if (!Array.isArray(data)) {
     console.warn("GamerPower devolvio una respuesta inesperada (no es una lista)");
     return [];

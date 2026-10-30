@@ -1,3 +1,5 @@
+import { fetchJson } from "./http.js";
+
 const STORE_BASE = "https://store.steampowered.com";
 const STEAMSPY_BASE = "https://steamspy.com/api.php";
 const STEAM_API_BASE = "https://api.steampowered.com";
@@ -22,9 +24,7 @@ export async function fetchReviewSummary(appid, language) {
   const url =
     `${STORE_BASE}/appreviews/${appid}?json=1&language=all&purchase_type=all` +
     `&num_per_page=0&l=${language}`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const data = await res.json();
+  const data = await fetchJson(url, { label: `reseñas ${appid}` });
   return summarize(data?.query_summary);
 }
 
@@ -36,9 +36,7 @@ export async function fetchRecentReviewSummary(appid, language) {
   const url =
     `${STORE_BASE}/appreviews/${appid}?json=1&language=all&purchase_type=all` +
     `&filter=all&day_range=30&num_per_page=0&l=${language}`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const data = await res.json();
+  const data = await fetchJson(url, { label: `reseñas recientes ${appid}` });
   return summarize(data?.query_summary);
 }
 
@@ -57,31 +55,23 @@ function playtimeOrNull(minutes) {
 }
 
 export async function fetchSteamSpy(appid) {
-  try {
-    const url = `${STEAMSPY_BASE}?request=appdetails&appid=${appid}`;
-    const res = await fetch(url, {
-      headers: { "User-Agent": "steam-free-tracker (contacto via github.com/FeloSP8)" },
-    });
-    if (!res.ok) {
-      console.warn(`SteamSpy ${appid} respondio ${res.status}`);
-      return null;
-    }
-    const data = await res.json();
-    if (!data || data.average_forever === undefined) return null;
+  const url = `${STEAMSPY_BASE}?request=appdetails&appid=${appid}`;
+  const data = await fetchJson(url, {
+    label: `SteamSpy ${appid}`,
+    headers: { "User-Agent": "steam-free-tracker (contacto via github.com/FeloSP8)" },
+  });
+  if (!data || data.average_forever === undefined) return null;
 
-    const averageForeverMinutes = playtimeOrNull(data.average_forever);
-    if (averageForeverMinutes === null) {
-      console.log(`SteamSpy no tiene horas jugadas de ${appid}; se ignora ese criterio`);
-    }
-
-    return {
-      averageForeverMinutes,
-      medianForeverMinutes: playtimeOrNull(data.median_forever),
-      owners: data.owners,
-    };
-  } catch {
-    return null;
+  const averageForeverMinutes = playtimeOrNull(data.average_forever);
+  if (averageForeverMinutes === null) {
+    console.log(`SteamSpy no tiene horas jugadas de ${appid}; se ignora ese criterio`);
   }
+
+  return {
+    averageForeverMinutes,
+    medianForeverMinutes: playtimeOrNull(data.median_forever),
+    owners: data.owners,
+  };
 }
 
 // Jugadores concurrentes actuales. Endpoint oficial de Steam (no SteamDB:
@@ -89,14 +79,8 @@ export async function fetchSteamSpy(appid) {
 // No da el pico de 24h que si tiene SteamDB, pero sirve como señal de
 // actividad real sin depender de scraping fragil.
 export async function fetchCurrentPlayerCount(appid) {
-  try {
-    const url = `${STEAM_API_BASE}/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=${appid}&format=json`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data?.response?.result !== 1) return null;
-    return data.response.player_count ?? null;
-  } catch {
-    return null;
-  }
+  const url = `${STEAM_API_BASE}/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=${appid}&format=json`;
+  const data = await fetchJson(url, { label: `jugadores actuales ${appid}` });
+  if (data?.response?.result !== 1) return null;
+  return data.response.player_count ?? null;
 }

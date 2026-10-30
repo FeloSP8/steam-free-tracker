@@ -125,86 +125,104 @@ async function main() {
   const unverified = [];
 
   for (const candidate of unseen) {
-    // Sin appid no hay forma de consultar reseñas/horas jugadas de Steam:
-    // se informa igualmente pero marcado como sin verificar, en vez de
-    // descartarlo o colarlo como si hubiera pasado el filtro de calidad.
-    if (!candidate.appid) {
-      unverified.push({
-        name: candidate.title,
-        claimUrl: candidate.openUrl,
-        worth: candidate.worth,
-        endDate: candidate.endDate,
-        headerImage: candidate.image ?? null,
-      });
+    // Red de seguridad: un fallo inesperado con un juego (una API que
+    // cambia de formato, un dato raro) no puede tumbar el aviso de los
+    // demas. No se marca como visto, asi que se reintenta en la siguiente
+    // pasada.
+    try {
+      // Sin appid no hay forma de consultar reseñas/horas jugadas de Steam:
+      // se informa igualmente pero marcado como sin verificar, en vez de
+      // descartarlo o colarlo como si hubiera pasado el filtro de calidad.
+      if (!candidate.appid) {
+        unverified.push({
+          name: candidate.title,
+          claimUrl: candidate.openUrl,
+          worth: candidate.worth,
+          endDate: candidate.endDate,
+          headerImage: candidate.image ?? null,
+        });
+        seen.add(stateKey(candidate));
+        continue;
+      }
+
+      await sleep(300); // ritmo suave para no saturar las APIs publicas
+
+      const [appDetails, reviews, recentReviews, steamspy, currentPlayers] = await Promise.all([
+        fetchAppDetails(candidate.appid, config.countryCode, config.language),
+        fetchReviewSummary(candidate.appid, config.language),
+        fetchRecentReviewSummary(candidate.appid, config.language),
+        fetchSteamSpy(candidate.appid),
+        fetchCurrentPlayerCount(candidate.appid),
+      ]);
+
+      // Sin ficha de Steam no se puede ni clasificar ni puntuar. Es un fallo
+      // temporal (429, corte de red), no una decision: no se marca como visto
+      // para que la siguiente ejecucion lo reintente en vez de silenciarlo.
+      //
+      // Lo mismo con las reseñas: sin ellas el juego se evaluaria con 0
+      // reseñas, caeria en descartados con un motivo falso y quedaria
+      // silenciado para siempre.
+      if (!appDetails || !reviews) {
+        console.warn(
+          `Sin ${!appDetails ? "ficha" : "reseñas"} de Steam para ` +
+            `${candidate.title ?? candidate.name} (appid ${candidate.appid}); ` +
+            `se reintentara en la proxima ejecucion.`
+        );
+        continue;
+      }
+
       seen.add(stateKey(candidate));
-      continue;
-    }
 
-    await sleep(300); // ritmo suave para no saturar las APIs publicas
+      if (appDetails.type !== "game") {
+        console.log(`Descartado por tipo "${appDetails.type}": ${appDetails.name}`);
+        continue; // DLC, software, OST...
+      }
 
-    const [appDetails, reviews, recentReviews, steamspy, currentPlayers] = await Promise.all([
-      fetchAppDetails(candidate.appid, config.countryCode, config.language),
-      fetchReviewSummary(candidate.appid, config.language),
-      fetchRecentReviewSummary(candidate.appid, config.language),
-      fetchSteamSpy(candidate.appid),
-      fetchCurrentPlayerCount(candidate.appid),
-    ]);
-
-    // Sin ficha de Steam no se puede ni clasificar ni puntuar. Es un fallo
-    // temporal (429, corte de red), no una decision: no se marca como visto
-    // para que la siguiente ejecucion lo reintente en vez de silenciarlo.
-    if (!appDetails) {
-      console.warn(
-        `Sin ficha de Steam para ${candidate.title ?? candidate.name} ` +
-          `(appid ${candidate.appid}); se reintentara en la proxima ejecucion.`
+      const availability = classifyAvailability(appDetails);
+      console.log(
+        `${appDetails.name}: ${availability.badge}` +
+          (availability.detail ? ` (${availability.detail})` : "")
       );
-      continue;
+
+      const name = appDetails.name ?? candidate.title ?? candidate.name;
+      const evaluation = evaluateGame({
+        reviews,
+        recentReviews,
+        steamspy,
+        appDetails,
+        currentPlayers,
+        quality: config.quality,
+      });
+
+      const game = {
+        appid: candidate.appid,
+        name,
+        headerImage: appDetails.headerImage ?? null,
+        // En un regalo de Steam el sitio donde se reclama es la propia ficha,
+        // no el enlace del agregador: es donde esta el boton "Añadir a la cuenta".
+        claimUrl:
+          availability.kind.startsWith("steam-")
+            ? `https://store.steampowered.com/app/${candidate.appid}`
+            : candidate.claimUrl ?? candidate.openUrl ?? `https://store.steampowered.com/app/${candidate.appid}`,
+        availability,
+        endDate: candidate.endDate ?? null,
+        // Ya venian en appdetails pero no se usaban: en la seccion de
+        // descartados son justo lo que deja juzgar si el juego te interesa
+        // aunque no haya pasado el filtro.
+        shortDescription: appDetails.shortDescription ?? null,
+        releaseDate: appDetails.releaseDate ?? null,
+        ...evaluation,
+      };
+
+      (evaluation.passes ? qualifying : rejected).push(game);
+    } catch (err) {
+      console.error(
+        `Error procesando ${candidate.title ?? candidate.name} (appid ${candidate.appid}); ` +
+          `se reintentara en la proxima ejecucion:`,
+        err
+      );
+      seen.delete(stateKey(candidate));
     }
-
-    seen.add(stateKey(candidate));
-
-    if (appDetails.type !== "game") {
-      console.log(`Descartado por tipo "${appDetails.type}": ${appDetails.name}`);
-      continue; // DLC, software, OST...
-    }
-
-    const availability = classifyAvailability(appDetails);
-    console.log(
-      `${appDetails.name}: ${availability.badge}` +
-        (availability.detail ? ` (${availability.detail})` : "")
-    );
-
-    const name = appDetails.name ?? candidate.title ?? candidate.name;
-    const evaluation = evaluateGame({
-      reviews,
-      recentReviews,
-      steamspy,
-      appDetails,
-      currentPlayers,
-      quality: config.quality,
-    });
-
-    const game = {
-      appid: candidate.appid,
-      name,
-      headerImage: appDetails.headerImage ?? null,
-      // En un regalo de Steam el sitio donde se reclama es la propia ficha,
-      // no el enlace del agregador: es donde esta el boton "Añadir a la cuenta".
-      claimUrl:
-        availability.kind.startsWith("steam-")
-          ? `https://store.steampowered.com/app/${candidate.appid}`
-          : candidate.claimUrl ?? candidate.openUrl ?? `https://store.steampowered.com/app/${candidate.appid}`,
-      availability,
-      endDate: candidate.endDate ?? null,
-      // Ya venian en appdetails pero no se usaban: en la seccion de
-      // descartados son justo lo que deja juzgar si el juego te interesa
-      // aunque no haya pasado el filtro.
-      shortDescription: appDetails.shortDescription ?? null,
-      releaseDate: appDetails.releaseDate ?? null,
-      ...evaluation,
-    };
-
-    (evaluation.passes ? qualifying : rejected).push(game);
   }
 
   if (qualifying.length > 0 || rejected.length > 0 || unverified.length > 0) {

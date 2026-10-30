@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { fetchJson } from "./http.js";
 
 const STORE_BASE = "https://store.steampowered.com";
 
@@ -13,12 +14,7 @@ const STORE_BASE = "https://store.steampowered.com";
  */
 export async function fetchFeaturedFreeGames(cc, language) {
   const url = `${STORE_BASE}/api/featuredcategories?cc=${cc}&l=${language}`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.warn(`featuredcategories respondio ${res.status}`);
-    return [];
-  }
-  const data = await res.json();
+  const data = await fetchJson(url, { label: "featuredcategories" });
   const items = data?.specials?.items ?? [];
 
   return items
@@ -57,15 +53,10 @@ export async function fetchSearchFreeGames(cc, language, { maxSearchPages, resul
       `${STORE_BASE}/search/results/?query&start=${start}&count=${resultsPerPage}` +
       `&specials=1&maxprice=free&category1=998&cc=${cc}&l=${language}&json=1`;
 
-    const res = await fetch(url, {
+    const data = await fetchJson(url, {
+      label: `busqueda de la tienda (pagina ${page})`,
       headers: { "User-Agent": "Mozilla/5.0 (steam-free-tracker daily job)" },
     });
-    if (!res.ok) {
-      console.warn(`busqueda de la tienda respondio ${res.status} (pagina ${page})`);
-      break;
-    }
-
-    const data = await res.json();
     const html = data?.results_html;
     if (!html) break;
 
@@ -110,9 +101,7 @@ export async function fetchSearchFreeGames(cc, language, { maxSearchPages, resul
 export async function resolveAppIdByTitle(title, cc, language) {
   if (!title) return null;
   const url = `${STORE_BASE}/api/storesearch/?term=${encodeURIComponent(title)}&cc=${cc}&l=${language}`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const data = await res.json();
+  const data = await fetchJson(url, { label: `storesearch "${title}"` });
   const items = data?.items ?? [];
   if (items.length === 0) return null;
 
@@ -152,12 +141,7 @@ function detectFreeToKeep(d) {
 
 export async function fetchAppDetails(appid, cc, language) {
   const url = `${STORE_BASE}/api/appdetails?appids=${appid}&cc=${cc}&l=${language}`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.warn(`appdetails ${appid} respondio ${res.status}`);
-    return null;
-  }
-  const data = await res.json();
+  const data = await fetchJson(url, { label: `appdetails ${appid}` });
   const entry = data?.[appid];
   if (!entry?.success) return null;
   const d = entry.data;
