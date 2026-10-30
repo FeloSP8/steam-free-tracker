@@ -4,11 +4,13 @@ import { fileURLToPath } from "node:url";
 
 import {
   fetchFeaturedFreeGames,
-  fetchSearchFreeGames,
+  fetchStoreQueryFreeGames,
+  fetchStoreItem,
   fetchAppDetails,
   resolveAppIdByTitle,
 } from "./steamApi.js";
 import { fetchSteamGiveaways } from "./gamerPower.js";
+import { fetchFeedGiveaways } from "./feeds.js";
 import {
   fetchReviewSummary,
   fetchRecentReviewSummary,
@@ -32,7 +34,7 @@ async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Combina las dos fuentes por appid cuando se conoce. Los giveaways de
+// Combina las fuentes por appid cuando se conoce. Los giveaways de
 // GamerPower sin appid resuelto se identifican por su propio id para no
 // perderlos en la deduplicacion ni repetirlos en dias sucesivos.
 function stateKey(candidate) {
@@ -83,15 +85,16 @@ function classifyAvailability(appDetails) {
 }
 
 async function collectCandidates(config) {
-  const [featured, searchResults, giveaways] = await Promise.all([
+  const [featured, queryResults, giveaways, feedGiveaways] = await Promise.all([
     fetchFeaturedFreeGames(config.countryCode, config.language),
-    fetchSearchFreeGames(config.countryCode, config.language, config.search),
+    fetchStoreQueryFreeGames(config.countryCode, config.language, config.search),
     fetchSteamGiveaways(),
+    fetchFeedGiveaways(config.feeds),
   ]);
 
   console.log(
-    `Fuentes — portada: ${featured.length}, busqueda: ${searchResults.length}, ` +
-      `GamerPower: ${giveaways.length}`
+    `Fuentes — portada: ${featured.length}, consulta de la tienda: ${queryResults.length}, ` +
+      `GamerPower: ${giveaways.length}, feeds: ${feedGiveaways.length}`
   );
 
   const resolved = await Promise.all(
@@ -102,8 +105,10 @@ async function collectCandidates(config) {
     })
   );
 
+  // Los feeds van los ultimos: si el mismo juego viene de otra fuente, esa
+  // trae mas datos (fecha de fin, valor, enlace de canje directo).
   const merged = new Map();
-  for (const item of [...featured, ...searchResults, ...resolved]) {
+  for (const item of [...featured, ...queryResults, ...resolved, ...feedGiveaways]) {
     const key = stateKey(item);
     if (!merged.has(key)) merged.set(key, item);
   }
@@ -147,13 +152,15 @@ async function main() {
 
       await sleep(300); // ritmo suave para no saturar las APIs publicas
 
-      const [appDetails, reviews, recentReviews, steamspy, currentPlayers] = await Promise.all([
-        fetchAppDetails(candidate.appid, config.countryCode, config.language),
-        fetchReviewSummary(candidate.appid, config.language),
-        fetchRecentReviewSummary(candidate.appid, config.language),
-        fetchSteamSpy(candidate.appid),
-        fetchCurrentPlayerCount(candidate.appid),
-      ]);
+      const [appDetails, storeItem, reviewSummary, recentReviews, steamspy, currentPlayers] =
+        await Promise.all([
+          fetchAppDetails(candidate.appid, config.countryCode, config.language),
+          fetchStoreItem(candidate.appid, config.countryCode, config.language),
+          fetchReviewSummary(candidate.appid, config.language),
+          fetchRecentReviewSummary(candidate.appid, config.language),
+          fetchSteamSpy(candidate.appid),
+          fetchCurrentPlayerCount(candidate.appid),
+        ]);
 
       // Sin ficha de Steam no se puede ni clasificar ni puntuar. Es un fallo
       // temporal (429, corte de red), no una decision: no se marca como visto
@@ -173,7 +180,13 @@ async function main() {
         continue; // DLC, software, OST...
       }
 
-      const availability = classifyAvailability(appDetails);
+      // GetItems dice explicitamente si es un regalo; appdetails solo deja
+      // deducirlo de package_groups. Basta con que lo vea una de las dos.
+      const availability = classifyAvailability({
+        ...appDetails,
+        freeToKeep: appDetails.freeToKeep ?? storeItem?.freeToKeep ?? null,
+      });
+      const endDate = candidate.endDate ?? storeItem?.freeUntil ?? null;
       console.log(
         `${appDetails.name}: ${availability.badge}` +
           (availability.detail ? ` (${availability.detail})` : "")
@@ -183,19 +196,29 @@ async function main() {
         ? `https://store.steampowered.com/app/${candidate.appid}`
         : candidate.claimUrl ?? candidate.openUrl ?? `https://store.steampowered.com/app/${candidate.appid}`;
 
-      // Sin reseñas no se puede aplicar el filtro, pero tampoco se puede
-      // reintentar sin limite: con Hexologic (30/10/2026) Steam devolvio HTML
-      // en el endpoint de reseñas pasada tras pasada, y reintentar significaba
-      // no avisar nunca. Evaluarlo con 0 reseñas tampoco vale (caeria en
-      // descartados con un motivo falso). Va a la seccion de "sin verificar",
-      // que es justo para esto: llega, pero sin sello de calidad.
+      // El endpoint de reseñas puede redirigir a la portada en vez de
+      // responder (el 30/10/2026 lo hacia con todos los juegos probados),
+      // pero GetItems trae el mismo resumen. El de los ultimos 30 dias no
+      // tiene repuesto.
+      const reviews = reviewSummary ?? storeItem?.reviews ?? null;
+      if (!reviewSummary && reviews) {
+        console.log(`Reseñas de ${appDetails.name} tomadas de GetItems`);
+      }
+
+      // Sin reseñas (ni siquiera de GetItems) no se puede aplicar el filtro,
+      // pero tampoco se puede reintentar sin limite: con Hexologic
+      // (30/10/2026) Steam devolvio HTML en el endpoint de reseñas pasada
+      // tras pasada, y reintentar significaba no avisar nunca. Evaluarlo con
+      // 0 reseñas tampoco vale (caeria en descartados con un motivo falso).
+      // Va a la seccion de "sin verificar", que es justo para esto: llega,
+      // pero sin sello de calidad.
       if (!reviews) {
         console.warn(`Sin reseñas de Steam para ${appDetails.name}; se avisa como sin verificar`);
         unverified.push({
           name: appDetails.name,
           claimUrl,
           worth: candidate.worth,
-          endDate: candidate.endDate,
+          endDate,
           headerImage: appDetails.headerImage ?? candidate.image ?? null,
           shortDescription: appDetails.shortDescription ?? null,
           availability,
@@ -221,7 +244,7 @@ async function main() {
         // no el enlace del agregador: es donde esta el boton "Añadir a la cuenta".
         claimUrl,
         availability,
-        endDate: candidate.endDate ?? null,
+        endDate,
         // Ya venian en appdetails pero no se usaban: en la seccion de
         // descartados son justo lo que deja juzgar si el juego te interesa
         // aunque no haya pasado el filtro.
