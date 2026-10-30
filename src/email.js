@@ -178,6 +178,7 @@ function gameCardHtml(game, variantName = "destacado") {
 function unverifiedRowHtml(game) {
   const endDate = formatEndDate(game.endDate);
   const detalle = [
+    game.availability?.badge ? escapeHtml(game.availability.badge) : null,
     game.worth && game.worth !== "N/A" ? `valorado en ${escapeHtml(game.worth)}` : null,
     endDate ? `hasta el ${endDate}` : null,
   ]
@@ -210,6 +211,13 @@ function unverifiedRowHtml(game) {
             ${
               detalle
                 ? `<p style="margin:0 0 10px 0;font-size:12px;color:#8a9bad;">${detalle}</p>`
+                : ""
+            }
+            ${
+              game.shortDescription
+                ? `<p style="margin:0 0 12px 0;font-size:14px;line-height:1.5;color:#c6d4e1;">
+                     ${escapeHtml(game.shortDescription)}
+                   </p>`
                 : ""
             }
             <p style="margin:0;">
