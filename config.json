@@ -13,5 +13,8 @@
   "search": {
     "maxSearchPages": 3,
     "resultsPerPage": 100
+  },
+  "feeds": {
+    "maxAgeDays": 7
   }
 }

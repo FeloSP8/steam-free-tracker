@@ -1,4 +1,5 @@
-// Todas las fuentes externas (Steam, SteamSpy, GamerPower) pasan por aqui.
+// Todas las fuentes externas (Steam, SteamSpy, GamerPower, feeds RSS) pasan
+// por aqui.
 //
 // Antes cada llamada hacia `await res.json()` a pelo. Cuando Steam limita
 // peticiones o tiene un mal momento no siempre responde con un error HTTP:
@@ -13,16 +14,21 @@
 
 const RETRY_DELAY_MS = 2000;
 
+// Con los feeds de terceros hay mas hosts de los que depender, y uno que no
+// responde no puede dejar la ejecucion colgada hasta el limite de Actions.
+const TIMEOUT_MS = 30000;
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function attempt(url, headers) {
+async function attempt(url, headers, asJson) {
   try {
-    const res = await fetch(url, { headers });
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (!res.ok) return { error: `HTTP ${res.status}` };
 
     const text = await res.text();
+    if (!asJson) return { data: text };
     try {
       return { data: JSON.parse(text) };
     } catch {
@@ -38,15 +44,24 @@ async function attempt(url, headers) {
   }
 }
 
-export async function fetchJson(url, { label, headers } = {}) {
-  let result = await attempt(url, headers);
+async function fetchWithRetry(url, { label, headers } = {}, asJson) {
+  let result = await attempt(url, headers, asJson);
   if (result.error) {
     await sleep(RETRY_DELAY_MS);
-    result = await attempt(url, headers);
+    result = await attempt(url, headers, asJson);
   }
   if (result.error) {
     console.warn(`${label ?? url}: ${result.error}; se continua sin este dato`);
     return null;
   }
   return result.data;
+}
+
+export function fetchJson(url, options) {
+  return fetchWithRetry(url, options, true);
+}
+
+// Para los feeds RSS/Atom, que no son JSON.
+export function fetchText(url, options) {
+  return fetchWithRetry(url, options, false);
 }

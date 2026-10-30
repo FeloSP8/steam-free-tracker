@@ -46,28 +46,45 @@ se dejan como información y no como filtro automático.
 
 ## Cómo detecta que un juego "pasa a ser gratis"
 
-Se combinan tres fuentes públicas, ninguna requiere API key ni login:
+Se combinan cuatro tipos de fuente pública, ninguna requiere API key ni
+login:
 
 1. **[GamerPower](https://www.gamerpower.com/api/giveaways?platform=steam&type=game)**
    — agregador dedicado a giveaways, filtrado a juegos completos en Steam.
    Cubre keys repartidas a través de partners, giveaways con mecanismo de
-   reclamo externo y —lo más importante— los regalos **"free to keep"** del
-   propio Steam, que ninguna de las otras dos fuentes puede ver (ver más
-   abajo). **No cubre** un editor que simplemente pone su propio juego a $0
-   directamente en su ficha sin ninguna key ni sitio externo — para eso está
-   la fuente 3.
+   reclamo externo y los regalos **"free to keep"** del propio Steam (ver
+   más abajo).
 2. `store.steampowered.com/api/featuredcategories` — ofertas destacadas en
    portada de Steam. Solo trae el top-10 rotativo de la home, no el catálogo
    completo de rebajas: un indie con buena nota rara vez entra ahí.
-3. **Búsqueda de la tienda** (`search/results/?specials=1&maxprice=free`)
-   — barrido de varias páginas de resultados filtrando por precio final 0.
-   Cubre el hueco que dejan las otras dos: promociones temporales al 100%
-   que el propio editor activa en su página sin pasar por un giveaway
-   formal ni aparecer en el top-10 de portada. Es la fuente más frágil
-   (Steam no lo expone como JSON limpio, se parsea el HTML de la página de
-   búsqueda con `cheerio`) — si Steam cambia las clases de ese HTML, esta
-   fuente puede dejar de encontrar resultados silenciosamente (nunca
-   falsos positivos, en el peor caso encuentra menos de lo que hay).
+3. **Consulta de la tienda** (`IStoreQueryService/Query`) — el servicio
+   JSON que usa la propia tienda de Steam para listar juegos. Se le piden
+   los juegos con un descuento de al menos el 99% y se queda con los que
+   tienen una opción de compra a 0: tanto descuentos al 100% que el editor
+   activa en su ficha sin giveaway formal como **regalos "free to keep"**,
+   que aquí aparecen marcados con `is_free_to_keep` (comprobado con
+   Hexologic en octubre de 2026). Es un servicio sin documentar, con una
+   rareza: con `min_discount_percent: 100` Steam ignora el filtro y
+   devuelve el catálogo entero, por eso se usa 99. Si algún día deja de
+   respetar el filtro, el log lo avisa en vez de quedarse a ciegas; nunca
+   da falsos positivos porque cada juego se comprueba uno a uno.
+   Sustituye al raspado del HTML de la búsqueda
+   (`search/results/?specials=1&maxprice=free`), que dejó de funcionar en
+   octubre de 2026: Steam cambió la respuesta de `json=1` y la fuente
+   devolvía 0 resultados en cada pasada sin que nada fallara.
+4. **Feeds de anuncios**, como respaldo de GamerPower:
+   - RSS de los grupos de Steam Community
+     [GrabFreeGames](https://steamcommunity.com/groups/GrabFreeGames) y
+     [Free Games Finders](https://steamcommunity.com/groups/freegamesfinders),
+     que escriben personas. Mezclan Steam con Epic, GOG, etc., así que solo
+     cuentan los anuncios con "Steam" en el título.
+   - El feed Atom de Steam de
+     [LootScraper](https://github.com/eikowagenknecht/lootscraper), un
+     agregador automático.
+
+   De cada anuncio se saca el `appid` del enlace a la ficha de Steam y solo
+   se miran los publicados en los últimos `feeds.maxAgeDays` días (7 por
+   defecto), para no avisar de regalos que ya acabaron.
 
 Cuando el giveaway de GamerPower no enlaza directamente a la ficha de Steam
 (p. ej. una key repartida por un partner), se intenta resolver el `appid`
@@ -83,27 +100,52 @@ Esto es importante porque solo una de las dos se ve en el precio:
 
 - **Descuento del 100%.** El paquete de siempre baja a 0. Aparece en
   `specials`, y `price_overview` lo refleja con `discount_percent: 100`.
-  Es el caso que detectan las fuentes 2 y 3.
+  Lo ven la portada (2) y la consulta de la tienda (3).
 - **Promoción "free to keep".** Steam añade un paquete gratuito temporal y
   la ficha muestra el botón *"Añadir a la cuenta"*, pero **el precio del
   paquete normal no cambia**: `price_overview` sigue diciendo 19,99 € e
   `is_free` sigue siendo `false`. Es el formato habitual de los regalos
-  permanentes de Steam (Moonlighter, agosto de 2026) y solo se detecta
-  mirando `package_groups` en busca de un sub con licencia gratuita.
-  **Las fuentes 2 y 3 son ciegas a este caso**: al filtrar por descuento,
-  nunca lo ven. Para estos la fuente útil es GamerPower (1).
+  permanentes de Steam (Moonlighter, agosto de 2026). En `appdetails` solo
+  se detecta mirando `package_groups` en busca de un sub con licencia
+  gratuita; `IStoreBrowseService/GetItems` lo dice directamente con
+  `is_free_to_keep` y `free_to_keep_ends`. **La portada (2) es ciega a este
+  caso**; lo ven GamerPower (1), la consulta de la tienda (3) y los feeds
+  (4). Hasta octubre de 2026 solo lo veía GamerPower, y si se caía no nos
+  enterábamos de ningún regalo.
 
 Cualquier candidato con `appid` resuelto se contrasta contra la API oficial
-`appdetails` de Steam, pero el resultado se usa para **etiquetar**, no para
-descartar: cada juego del correo indica si es un regalo de Steam, un
-descuento al 100% o una key de un giveaway externo (y en ese caso, cuánto
-sigue costando en Steam). Si `appdetails` no responde, el candidato no se
-marca como visto y se reintenta en la siguiente pasada, en vez de quedar
-silenciado para siempre.
+`appdetails` de Steam y contra `IStoreBrowseService/GetItems`, pero el
+resultado se usa para **etiquetar**, no para descartar: cada juego del
+correo indica si es un regalo de Steam, un descuento al 100% o una key de un
+giveaway externo (y en ese caso, cuánto sigue costando en Steam). Si
+`appdetails` no responde, el candidato no se marca como visto y se
+reintenta en la siguiente pasada, en vez de quedar silenciado para siempre.
+
+GetItems aporta además dos cosas: la **fecha de fin** de los regalos y
+descuentos de Steam (antes solo aparecía en el correo si el juego venía de
+GamerPower) y un **resumen de reseñas de repuesto**. El endpoint de reseñas
+(`appreviews`) puede redirigir a la portada en vez de responder (a finales
+de octubre de 2026 lo hacía con todos los juegos probados), y entonces el
+juego acababa en "sin verificar"; ahora se evalúa con las reseñas de
+GetItems. La comprobación de las reseñas de los últimos 30
+días no tiene repuesto y en ese caso se omite.
 
 > Limitación conocida: no detecta el caso raro de un juego que cambia
 > permanentemente su modelo a Free-to-Play sin pasar por ningún giveaway
 > ni oferta (ninguna de las fuentes lo reportaría).
+
+### Fuentes evaluadas y descartadas (octubre de 2026)
+
+- **SteamDB** (`steamdb.info/upcoming/free`): su FAQ prohíbe el scraping.
+- **Reddit** (r/FreeGameFindings, r/FreeGamesOnSteam): los endpoints
+  `.json` sin login devuelven 403 desde mayo de 2026, y el plan gratuito
+  de OAuth requiere aprobación manual.
+- **IsThereAnyDeal**: necesita API key y solo ve descuentos, no regalos.
+- **GG.deals**: su API solo consulta precios por appid, no lista
+  juegos gratis.
+- **CheapShark**: solo ve descuentos y no está claro que filtre por precio 0.
+- Otros grupos de Steam Community (FreeSteamKeyGames, freegamecodes,
+  FreeGamesAnnouncements) llevan años sin publicar.
 
 El estado de qué juegos ya se han notificado se guarda en `data/seen.json`
 (por `appid` de Steam, o por id de GamerPower si no se pudo resolver uno)
@@ -155,9 +197,16 @@ consultas a Steam:
   "search": {
     "maxSearchPages": 3,
     "resultsPerPage": 100
+  },
+  "feeds": {
+    "maxAgeDays": 7
   }
 }
 ```
+
+`search` controla las páginas de la consulta de la tienda (fuente 3) y
+`feeds.maxAgeDays` la antigüedad máxima de los anuncios de los feeds
+(fuente 4).
 
 ### 3. Activar el cron
 

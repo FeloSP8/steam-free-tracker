@@ -1,7 +1,7 @@
-import * as cheerio from "cheerio";
 import { fetchJson } from "./http.js";
 
 const STORE_BASE = "https://store.steampowered.com";
+const STEAM_API_BASE = "https://api.steampowered.com";
 
 /**
  * Ofertas destacadas en portada de Steam (JSON oficial, sin scraping).
@@ -27,69 +27,160 @@ export async function fetchFeaturedFreeGames(cc, language) {
     }));
 }
 
+// IStoreQueryService e IStoreBrowseService son los servicios que usa la
+// propia tienda de Steam. No estan documentados, pero responden sin key y
+// reciben los parametros como JSON en `input_json`.
+function storeServiceUrl(service, method, input) {
+  return (
+    `${STEAM_API_BASE}/${service}/${method}/v1/?input_json=` +
+    encodeURIComponent(JSON.stringify(input))
+  );
+}
+
+function storeContext(cc, language) {
+  return { language, country_code: cc.toUpperCase(), steam_realm: 1 };
+}
+
+function unixToIso(seconds) {
+  return Number(seconds) > 0 ? new Date(Number(seconds) * 1000).toISOString() : null;
+}
+
+// La opcion de compra que hace gratis un juego: el paquete promocional de un
+// regalo "free to keep" (va aparte del paquete normal, ver detectFreeToKeep)
+// o el paquete de siempre rebajado al 100%.
+function freePurchaseOption(item) {
+  const options = [item.best_purchase_option, ...(item.purchase_options ?? [])].filter(Boolean);
+  return (
+    options.find((o) => o.is_free_to_keep) ??
+    options.find((o) => o.discount_pct === 100 && Number(o.final_price_in_cents) === 0) ??
+    null
+  );
+}
+
+// Hasta cuando es gratis. Los regalos traen free_to_keep_ends; un descuento
+// normal solo trae la fecha de fin de cada rebaja aplicada, y deja de ser
+// gratis en cuanto acaba la primera.
+function freeUntil(option) {
+  if (option.free_to_keep_ends) return unixToIso(option.free_to_keep_ends);
+  const ends = (option.active_discounts ?? [])
+    .map((d) => Number(d.discount_end_date))
+    .filter((t) => t > 0);
+  return ends.length > 0 ? unixToIso(Math.min(...ends)) : null;
+}
+
 /**
- * Barrido de la busqueda de la tienda filtrando por ofertas con precio final
- * 0. Cubre un hueco real que ni GamerPower ni featuredcategories detectan:
- * un editor que pone su propio juego a $0 directamente en su ficha de Steam
- * durante unos dias, sin key externa ni giveaway formal (featuredcategories
- * solo trae el top-10 rotativo de portada; GamerPower solo cubre giveaways
- * con reclamo externo). Steam no expone esto como JSON limpio, asi que se
- * parsea el fragmento HTML que devuelve la propia pagina de busqueda.
+ * Juegos gratis por rebaja o regalo segun la consulta de la propia tienda
+ * (IStoreQueryService/Query), en JSON y sin key.
  *
- * Es la parte mas fragil del sistema: si Steam cambia las clases del HTML
- * de busqueda, esta funcion puede dejar de encontrar resultados (fallara en
- * silencio, devolviendo menos o cero items, nunca falsos positivos).
+ * Sustituye al raspado del HTML de la busqueda (`search/results`), que dejo
+ * de funcionar en octubre de 2026: Steam cambio la respuesta de `json=1` y
+ * la fuente devolvia 0 resultados en cada pasada sin que nada fallara.
  *
- * Comparte punto ciego con featuredcategories: al filtrar por descuento del
- * 100%, las promociones "free to keep" (que no son un descuento) tampoco
- * aparecen aqui. Para esas la fuente util es GamerPower.
+ * Y cubre lo que aquella busqueda no veia: un regalo "free to keep" sale aqui
+ * como opcion de compra con is_free_to_keep, asi que ya no dependemos solo de
+ * GamerPower para enterarnos de los regalos de Steam (comprobado con
+ * Hexologic el 30/10/2026).
  */
-export async function fetchSearchFreeGames(cc, language, { maxSearchPages, resultsPerPage }) {
+export async function fetchStoreQueryFreeGames(cc, language, { maxSearchPages, resultsPerPage }) {
   const found = new Map();
 
   for (let page = 0; page < maxSearchPages; page++) {
     const start = page * resultsPerPage;
-    const url =
-      `${STORE_BASE}/search/results/?query&start=${start}&count=${resultsPerPage}` +
-      `&specials=1&maxprice=free&category1=998&cc=${cc}&l=${language}&json=1`;
-
-    const data = await fetchJson(url, {
-      label: `busqueda de la tienda (pagina ${page})`,
-      headers: { "User-Agent": "Mozilla/5.0 (steam-free-tracker daily job)" },
+    const url = storeServiceUrl("IStoreQueryService", "Query", {
+      query_name: "steam-free-tracker",
+      query: {
+        start,
+        count: resultsPerPage,
+        filters: {
+          released_only: true,
+          type_filters: { include_games: true },
+          // 99 y no 100 a proposito: con 100 Steam ignora el filtro y
+          // devuelve el catalogo entero. Con 99 solo salen los juegos a 0
+          // (probado el 30/10/2026); el 99% real se descarta abajo.
+          price_filters: { min_discount_percent: 99 },
+        },
+      },
+      context: storeContext(cc, language),
+      data_request: { include_all_purchase_options: true },
     });
-    const html = data?.results_html;
-    if (!html) break;
 
-    const $ = cheerio.load(html);
-    const rows = $("a.search_result_row");
-    if (rows.length === 0) break;
+    const data = await fetchJson(url, { label: `consulta de la tienda (pagina ${page})` });
+    const items = data?.response?.store_items ?? [];
+    const total = Number(data?.response?.metadata?.total_matching_records ?? 0);
 
-    rows.each((_, el) => {
-      const appid = Number($(el).attr("data-ds-appid"));
-      if (!appid) return;
-      const name = $(el).find(".title").text().trim();
-      const discountPercentText = $(el).find(".discount_pct").text().trim();
-      const discountPercent = discountPercentText
-        ? Math.abs(parseInt(discountPercentText.replace(/[^0-9]/g, ""), 10))
-        : null;
+    // Si Steam deja de respetar el filtro no hay falsos positivos (cada juego
+    // se comprueba abajo), pero se veria solo un trozo del catalogo. Mejor
+    // enterarse que quedarse a ciegas como paso con la busqueda HTML.
+    if (page === 0 && total > 1000) {
+      console.warn(
+        `La consulta de la tienda devuelve ${total} juegos: parece que Steam ignora el ` +
+          `filtro de descuento; esta fuente puede perderse juegos gratis`
+      );
+    }
 
-      // Solo descuentos confirmados al 100%. Si no se pudo parsear el
-      // porcentaje, se descarta en vez de arriesgarnos a un falso positivo
-      // (p.ej. un F2P de toda la vida coincidiendo con maxprice=free).
-      if (discountPercent !== 100) return;
-
-      found.set(appid, {
-        appid,
-        name,
-        claimUrl: `${STORE_BASE}/app/${appid}`,
-        source: "steam-search",
+    for (const item of items) {
+      const option = freePurchaseOption(item);
+      if (!item.appid || !option) continue;
+      found.set(item.appid, {
+        appid: item.appid,
+        name: item.name,
+        claimUrl: `${STORE_BASE}/app/${item.appid}`,
+        endDate: freeUntil(option),
+        source: "steam-query",
       });
-    });
+    }
 
-    if (Number(data.total_count) <= start + resultsPerPage) break;
+    if (items.length === 0 || total <= start + resultsPerPage) break;
   }
 
   return Array.from(found.values());
+}
+
+/**
+ * Ficha de un juego segun IStoreBrowseService/GetItems. Complementa a
+ * appdetails en dos cosas que esta no da bien:
+ *
+ *  - Confirma un regalo "free to keep" con un campo explicito
+ *    (is_free_to_keep) en vez de deducirlo de package_groups, y dice hasta
+ *    cuando dura (free_to_keep_ends). Antes esa fecha solo llegaba si el
+ *    regalo venia de GamerPower.
+ *  - Trae el resumen de reseñas. Con Hexologic (30/10/2026) el endpoint de
+ *    reseñas redirigia a la portada pasada tras pasada y el juego acababa
+ *    "sin verificar"; GetItems si tenia sus 690 reseñas.
+ */
+export async function fetchStoreItem(appid, cc, language) {
+  const url = storeServiceUrl("IStoreBrowseService", "GetItems", {
+    ids: [{ appid }],
+    context: storeContext(cc, language),
+    data_request: { include_all_purchase_options: true, include_reviews: true },
+  });
+  const data = await fetchJson(url, { label: `GetItems ${appid}` });
+  const item = data?.response?.store_items?.[0];
+  if (!item || item.success !== 1) return null;
+
+  const option = freePurchaseOption(item);
+  const summary = item.reviews?.summary_filtered;
+  const reviewCount = Number(summary?.review_count ?? 0);
+  const positivePercent = Number(summary?.percent_positive ?? 0);
+  const totalPositive = Math.round((reviewCount * positivePercent) / 100);
+
+  return {
+    freeToKeep: option?.is_free_to_keep
+      ? { packageId: option.packageid ?? null, optionText: option.purchase_option_name ?? null }
+      : null,
+    freeUntil: option ? freeUntil(option) : null,
+    // Mismo formato que fetchReviewSummary, para poder usarlo de repuesto.
+    reviews:
+      reviewCount > 0
+        ? {
+            totalReviews: reviewCount,
+            totalPositive,
+            totalNegative: reviewCount - totalPositive,
+            positivePercent,
+            reviewScoreDesc: summary.review_score_label ?? null,
+          }
+        : null,
+  };
 }
 
 /**
@@ -122,10 +213,11 @@ export async function resolveAppIdByTitle(title, cc, language) {
  *     temporal y la ficha muestra "Añadir a la cuenta". price_overview sigue
  *     diciendo el precio normal e is_free sigue siendo false.
  *
- * La forma (2) es la habitual en los regalos permanentes de Steam y solo se
- * puede detectar mirando package_groups en busca de un sub con licencia
- * gratuita. Sin esto, un juego regalado por Steam es indistinguible de uno
- * que sigue costando dinero.
+ * La forma (2) es la habitual en los regalos permanentes de Steam y en
+ * appdetails solo se puede detectar mirando package_groups en busca de un sub
+ * con licencia gratuita (GetItems lo dice directamente, ver fetchStoreItem).
+ * Sin esto, un juego regalado por Steam es indistinguible de uno que sigue
+ * costando dinero.
  */
 function detectFreeToKeep(d) {
   const subs = (d.package_groups ?? []).flatMap((g) => g.subs ?? []);
