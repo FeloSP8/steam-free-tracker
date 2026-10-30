@@ -158,15 +158,10 @@ async function main() {
       // Sin ficha de Steam no se puede ni clasificar ni puntuar. Es un fallo
       // temporal (429, corte de red), no una decision: no se marca como visto
       // para que la siguiente ejecucion lo reintente en vez de silenciarlo.
-      //
-      // Lo mismo con las reseñas: sin ellas el juego se evaluaria con 0
-      // reseñas, caeria en descartados con un motivo falso y quedaria
-      // silenciado para siempre.
-      if (!appDetails || !reviews) {
+      if (!appDetails) {
         console.warn(
-          `Sin ${!appDetails ? "ficha" : "reseñas"} de Steam para ` +
-            `${candidate.title ?? candidate.name} (appid ${candidate.appid}); ` +
-            `se reintentara en la proxima ejecucion.`
+          `Sin ficha de Steam para ${candidate.title ?? candidate.name} ` +
+            `(appid ${candidate.appid}); se reintentara en la proxima ejecucion.`
         );
         continue;
       }
@@ -184,6 +179,30 @@ async function main() {
           (availability.detail ? ` (${availability.detail})` : "")
       );
 
+      const claimUrl = availability.kind.startsWith("steam-")
+        ? `https://store.steampowered.com/app/${candidate.appid}`
+        : candidate.claimUrl ?? candidate.openUrl ?? `https://store.steampowered.com/app/${candidate.appid}`;
+
+      // Sin reseñas no se puede aplicar el filtro, pero tampoco se puede
+      // reintentar sin limite: con Hexologic (30/10/2026) Steam devolvio HTML
+      // en el endpoint de reseñas pasada tras pasada, y reintentar significaba
+      // no avisar nunca. Evaluarlo con 0 reseñas tampoco vale (caeria en
+      // descartados con un motivo falso). Va a la seccion de "sin verificar",
+      // que es justo para esto: llega, pero sin sello de calidad.
+      if (!reviews) {
+        console.warn(`Sin reseñas de Steam para ${appDetails.name}; se avisa como sin verificar`);
+        unverified.push({
+          name: appDetails.name,
+          claimUrl,
+          worth: candidate.worth,
+          endDate: candidate.endDate,
+          headerImage: appDetails.headerImage ?? candidate.image ?? null,
+          shortDescription: appDetails.shortDescription ?? null,
+          availability,
+        });
+        continue;
+      }
+
       const name = appDetails.name ?? candidate.title ?? candidate.name;
       const evaluation = evaluateGame({
         reviews,
@@ -200,10 +219,7 @@ async function main() {
         headerImage: appDetails.headerImage ?? null,
         // En un regalo de Steam el sitio donde se reclama es la propia ficha,
         // no el enlace del agregador: es donde esta el boton "Añadir a la cuenta".
-        claimUrl:
-          availability.kind.startsWith("steam-")
-            ? `https://store.steampowered.com/app/${candidate.appid}`
-            : candidate.claimUrl ?? candidate.openUrl ?? `https://store.steampowered.com/app/${candidate.appid}`,
+        claimUrl,
         availability,
         endDate: candidate.endDate ?? null,
         // Ya venian en appdetails pero no se usaban: en la seccion de

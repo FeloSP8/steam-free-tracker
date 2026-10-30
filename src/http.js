@@ -26,8 +26,12 @@ async function attempt(url, headers) {
     try {
       return { data: JSON.parse(text) };
     } catch {
+      // La URL final dice si Steam nos ha redirigido (p.ej. a la ficha o a
+      // la portada), que es lo que distingue un bloqueo pasajero de un
+      // endpoint que ha cambiado.
       const preview = text.slice(0, 60).replace(/\s+/g, " ");
-      return { error: `respuesta no JSON ("${preview}...")` };
+      const redirect = res.redirected ? `, redirigido a ${res.url}` : "";
+      return { error: `respuesta no JSON (HTTP ${res.status}${redirect}: "${preview}...")` };
     }
   } catch (err) {
     return { error: `error de red (${err.message})` };
